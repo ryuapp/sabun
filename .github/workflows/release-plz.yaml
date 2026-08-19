@@ -1,0 +1,170 @@
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Create release
+    runs-on: ubuntu-24.04
+    outputs:
+      releases: ${{ steps.release-plz.outputs.releases }}
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - &checkout
+        name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - &rust
+        name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: stable
+
+      - name: Release merged release PR
+        id: release-plz
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-release:
+    name: Build ${{ matrix.asset }}
+    needs: release
+    if: needs.release.outputs.releases_created == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            asset: sabun-windows-x86_64
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            asset: sabun-windows-aarch64
+          - runner: macos-26
+            target: aarch64-apple-darwin
+            asset: sabun-macos-aarch64
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            asset: sabun-linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: sabun-linux-aarch64
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ fromJSON(needs.release.outputs.releases)[0].tag }}
+      ASSET_NAME: ${{ matrix.asset }}
+    steps:
+      - name: Checkout released tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(needs.release.outputs.releases)[0].tag }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang libwayland-dev libxkbcommon-x11-dev libvulkan-dev
+
+      - name: Build Sabun
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package and upload Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $archive = "$env:ASSET_NAME.zip"
+          $checksum = "$archive.sha256"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/sabun.exe" -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content $checksum -NoNewline
+          gh release upload $env:RELEASE_TAG $archive $checksum --clobber
+
+      - name: Package and upload Unix executable
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          archive="$ASSET_NAME.zip"
+          checksum="$archive.sha256"
+          mkdir -p package
+          cp "target/${{ matrix.target }}/release/sabun" package/sabun
+          chmod 755 package/sabun
+          zip -j "$archive" package/sabun
+          mkdir -p verify
+          unzip -q "$archive" -d verify
+          test -x verify/sabun
+          verify/sabun --version
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            shasum -a 256 "$archive" > "$checksum"
+          else
+            sha256sum "$archive" > "$checksum"
+          fi
+          gh release upload "$RELEASE_TAG" "$archive" "$checksum" --clobber
+
+  publish-release:
+    name: Publish release
+    needs:
+      - release
+      - build-release
+    if: needs.release.outputs.releases_created == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ fromJSON(needs.release.outputs.releases)[0].tag }}
+    steps:
+      - name: Publish completed release
+        shell: bash
+        run: |
+          prerelease="$(gh release view "$RELEASE_TAG" --json isPrerelease --jq '.isPrerelease')"
+          if [[ "$prerelease" == "true" ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi
+
+  release-pr:
+    name: Prepare release PR
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - *checkout
+      - *rust
+
+      - name: Create or update release PR
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,26 @@
+[workspace]
+# Sabun is distributed as an application, not through crates.io. Use Git tags as
+# the source of truth for versions and create GitHub releases without publishing.
+git_only = true
+git_tag_name = "v{{ version }}"
+git_release_name = "Sabun v{{ version }}"
+git_release_type = "auto"
+# Keep the release mutable while platform binaries are being attached. The
+# workflow publishes it only after every build succeeds, at which point GitHub
+# can safely make it immutable.
+git_release_draft = true
+git_release_latest = false
+
+# Only release after the release PR is merged. Ordinary pushes merely update the
+# release PR, so an arbitrary commit on main cannot be released accidentally.
+release_always = false
+
+# Keep dependency upgrades separate from release preparation.
+dependencies_update = false
+
+# Sabun is a binary crate, so API compatibility checks do not apply.
+semver_check = false
+
+[changelog]
+protect_breaking_commits = true
+sort_commits = "oldest"

@@ -1,0 +1,62 @@
+[package]
+name = "sabun"
+version = "0.0.1"
+edition = "2024"
+publish = false
+license = "MIT-0"
+
+[dependencies]
+bpaf = { version = "=0.9.27", features = ["derive"] }
+gpui = "=0.2.2"
+git2 = { version = "=0.21.0", features = ["vendored-libgit2"] }
+notify = "=8.2.0"
+similar = { version = "=3.1.2", features = ["inline", "unicode"] }
+syntect = "=5.3.0"
+two-face = { version = "=0.5.2", default-features = false, features = ["syntect-onig"] }
+unicode-width = "=0.2.2"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "=0.1.31"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "=0.2.7"
+
+[lints.rust]
+# MSVC reports import-library creation on stdout even when linking succeeds.
+linker_messages = "allow"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+wildcard_imports = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+# Six-digit RGB values are easier to compare without numeric separators.
+unreadable_literal = "allow"
+# GPUI render code intentionally uses Copy palettes and callback-compatible signatures.
+large_types_passed_by_value = "allow"
+needless_pass_by_ref_mut = "allow"
+# Declarative UI construction and bounded UI indices make these pedantic lints noisy.
+too_many_lines = "allow"
+cast_precision_loss = "allow"
+unused_self = "allow"
+similar_names = "allow"
+# Generated GPUI action types derive only the traits supplied by the macro.
+derive_partial_eq_without_eq = "allow"
+# Top-level private modules expose a small interface to their parent and sibling modules.
+redundant_pub_crate = "allow"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# GPUI does substantial layout and text shaping work inside dependencies. Keep app code quick to
+# compile while making ordinary `cargo run` builds fast enough for fluid scrolling.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
