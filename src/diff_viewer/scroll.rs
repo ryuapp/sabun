@@ -115,6 +115,7 @@ pub(super) fn vertical_auto_scroll_cursor(displacement: Pixels) -> CursorStyle {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub(super) fn windows_vertical_pan_cursor_id(displacement: Pixels) -> u16 {
     let displacement = f32::from(displacement);
     if displacement < -MIDDLE_AUTO_SCROLL_DEAD_ZONE {
@@ -132,7 +133,7 @@ pub(super) fn set_native_middle_auto_scroll_cursor(displacement: Pixels) {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(super) fn set_native_middle_auto_scroll_cursor(_displacement: Pixels) {}
+pub(super) const fn set_native_middle_auto_scroll_cursor(_displacement: Pixels) {}
 
 #[cfg(target_os = "windows")]
 pub(super) fn restore_native_cursor() {
@@ -140,7 +141,7 @@ pub(super) fn restore_native_cursor() {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(super) fn restore_native_cursor() {}
+pub(super) const fn restore_native_cursor() {}
 
 #[cfg(target_os = "windows")]
 pub(super) fn set_windows_cursor_resource(resource_id: u16) {

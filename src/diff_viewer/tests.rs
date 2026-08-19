@@ -2,7 +2,6 @@ use gpui::{CursorStyle, HighlightStyle, ScrollDelta, point, px, rgb, size};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write as _,
-    path::Path,
 };
 
 use super::text_selection::TextPoint;
@@ -10,14 +9,13 @@ use crate::diff::{DiffFile, DiffHunk, DiffSet, LineKind};
 
 use super::{
     ContextExpandDirection, ContextExpansion, ContextGap, ContextGapPosition, ContextGapSource,
-    DIFF_ROW_HEIGHT, DiffDisplayRow, DiffLayout, FileChangeKind, FileTreeRow, FileViewMeta,
-    HeaderTextSelection, InterpolatedOffsets, Palette, TextLane, TextSelection, ThemeMode,
-    WHEEL_PIXELS_PER_LINE, accumulate_scroll_target, apply_selection_background,
-    build_diff_row_data, build_diff_rows, build_file_diff_rows, build_file_tree_rows,
-    clamp_context_menu_position, clamped_sidebar_width, collapse_file_rows, detected_language,
-    detected_language_for_file, diff_row_layouts, file_tree_row_offsets, inline_ranges,
-    middle_auto_scroll_velocity, paired_line, row_offsets, selection_padding_edges,
-    sticky_file_tree_directories, syntax_highlighter, syntax_highlights,
+    DIFF_ROW_HEIGHT, DiffDisplayRow, DiffLayout, FileChangeKind, FileTreeRow, HeaderTextSelection,
+    InterpolatedOffsets, Palette, TextLane, TextSelection, ThemeMode, WHEEL_PIXELS_PER_LINE,
+    accumulate_scroll_target, apply_selection_background, build_diff_row_data, build_diff_rows,
+    build_file_diff_rows, build_file_tree_rows, clamp_context_menu_position, clamped_sidebar_width,
+    collapse_file_rows, detected_language, detected_language_for_file, diff_row_layouts,
+    file_tree_row_offsets, inline_ranges, middle_auto_scroll_velocity, paired_line, row_offsets,
+    selection_padding_edges, sticky_file_tree_directories, syntax_highlighter, syntax_highlights,
     syntax_highlights_with_state, syntax_set, syntax_theme, unpack_diff_row_index,
     vertical_auto_scroll_cursor, wheel_zoom_direction, windows_vertical_pan_cursor_id,
 };
