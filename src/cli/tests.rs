@@ -555,6 +555,7 @@ impl Fixture {
         let root = std::env::temp_dir().join(format!("sabun-git-test-{nonce}"));
         fs::create_dir_all(&root).unwrap();
         let repository = Repository::init(&root).unwrap();
+        let root = repository.workdir().unwrap().to_owned();
         fs::write(root.join("tracked.txt"), "initial\n").unwrap();
         commit_all(&repository, "initial");
         Self { root }
