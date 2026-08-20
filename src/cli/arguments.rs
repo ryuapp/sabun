@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use bpaf::{OptionParser, Parser, construct, long, positional};
+use bpaf::{Parser, construct, long, positional, short};
+
+const VERSION_TEXT: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Options {
@@ -14,6 +16,12 @@ pub(super) enum Command {
     Show(ShowOptions),
     StashShow(StashShowOptions),
     Patch(PatchOptions),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CliAction {
+    Run(Options),
+    Version,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,7 +127,7 @@ fn command_parser() -> impl Parser<Command> {
     construct!([diff_parser(), show_parser(), stash_parser(), patch_parser(),])
 }
 
-pub(super) fn options() -> OptionParser<Options> {
+fn options_parser() -> impl Parser<Options> {
     let repo = long("repo")
         .help("Select the repository for Git-backed commands")
         .argument::<PathBuf>("PATH")
@@ -127,12 +135,32 @@ pub(super) fn options() -> OptionParser<Options> {
     let command = command_parser();
 
     construct!(Options { repo, command })
+}
+
+#[cfg(test)]
+pub(super) fn options() -> bpaf::OptionParser<Options> {
+    options_parser()
         .to_options()
         .descr("GPU-accelerated Git diff viewer")
-        .version(env!("CARGO_PKG_VERSION"))
         .fallback_to_usage()
 }
 
 pub(super) fn parse() -> Options {
-    options().run()
+    let version = short('V')
+        .long("version")
+        .help("Print version information")
+        .req_flag(CliAction::Version);
+    let run = options_parser().map(CliAction::Run);
+    let parser = construct!([version, run])
+        .to_options()
+        .descr("GPU-accelerated Git diff viewer")
+        .fallback_to_usage();
+
+    match parser.run() {
+        CliAction::Run(options) => options,
+        CliAction::Version => {
+            println!("{VERSION_TEXT}");
+            std::process::exit(0);
+        }
+    }
 }
