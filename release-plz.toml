@@ -3,7 +3,7 @@
 # the source of truth for versions and create GitHub releases without publishing.
 git_only = true
 git_tag_name = "v{{ version }}"
-git_release_name = "Sabun v{{ version }}"
+git_release_name = "v{{ version }}"
 git_release_type = "auto"
 # Keep the release mutable while platform binaries are being attached. The
 # workflow publishes it only after every build succeeds, at which point GitHub
