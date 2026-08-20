@@ -182,10 +182,13 @@ mod tests {
             let Ok(event) = receiver.recv_timeout(remaining) else {
                 break false;
             };
-            if event
-                .as_ref()
-                .is_ok_and(|event| should_reload(event) && event.paths.contains(&changed))
-            {
+            if event.as_ref().is_ok_and(|event| {
+                should_reload(event)
+                    && event
+                        .paths
+                        .iter()
+                        .any(|path| path.file_name() == changed.file_name())
+            }) {
                 break true;
             }
         };
