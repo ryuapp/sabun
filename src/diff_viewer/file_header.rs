@@ -1,8 +1,8 @@
 use super::{
     Animation, AnimationExt, Context, CopyPathFeedbackPhase, CursorStyle, DiffStats, DiffViewer,
-    Duration, FileChangeBadge, FontWeight, HighlightStyle, InteractiveElement, IntoElement,
-    MouseButton, Palette, ParentElement, SCROLLBAR_WIDTH, Styled, StyledText, combine_highlights,
-    div, ease_out_quint, px,
+    Duration, FileChangeBadge, FluentBuilder, FontWeight, HighlightStyle, InteractiveElement,
+    IntoElement, MouseButton, Palette, ParentElement, SCROLLBAR_WIDTH, Styled, StyledText,
+    combine_highlights, div, ease_out_quint, px,
 };
 use crate::icons::{DISCLOSURE_ICON_SIZE, check_icon, copy_icon, disclosure_icon};
 
@@ -18,6 +18,7 @@ impl DiffViewer {
             return div().into_any_element();
         };
         let collapsed = self.collapsed_files.contains(&file_index);
+        let viewed = self.is_file_viewed(file_index);
         let (additions, deletions) = self.file_stats.get(file_index).copied().unwrap_or_default();
         let file_name_end = file.header_path.len();
         let file_name_highlight = [(
@@ -221,7 +222,69 @@ impl DiffViewer {
                             ),
                     ),
             )
-            .child(DiffStats::new(additions, deletions, palette).font_weight(FontWeight::MEDIUM))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        DiffStats::new(additions, deletions, palette)
+                            .font_weight(FontWeight::MEDIUM),
+                    )
+                    .child(
+                        div()
+                            .id((
+                                if sticky {
+                                    "sticky-file-viewed"
+                                } else {
+                                    "file-viewed"
+                                },
+                                file_index,
+                            ))
+                            .h(px(28.))
+                            .px_2()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(palette.border)
+                            .bg(palette.elevated)
+                            .text_xs()
+                            .text_color(if viewed { palette.green } else { palette.muted })
+                            .hover(|button| button.bg(palette.hover))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_file_viewed(file_index, cx);
+                                }),
+                            )
+                            .child(
+                                div()
+                                    .size(px(15.))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_sm()
+                                    .border_1()
+                                    .border_color(if viewed {
+                                        palette.green
+                                    } else {
+                                        palette.muted
+                                    })
+                                    .when(viewed, |checkbox| {
+                                        checkbox
+                                            .bg(palette.green)
+                                            .child(check_icon(palette.canvas, px(13.)))
+                                    }),
+                            )
+                            .child("Viewed"),
+                    ),
+            )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event, _, cx| {
