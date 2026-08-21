@@ -2,6 +2,7 @@
 # Sabun is distributed as an application, not through crates.io. Use Git tags as
 # the source of truth for versions and create GitHub releases without publishing.
 git_only = true
+publish = false
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 git_release_type = "auto"

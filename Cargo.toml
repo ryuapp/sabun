@@ -2,7 +2,6 @@
 name = "sabun"
 version = "0.0.1"
 edition = "2024"
-publish = false
 license = "MIT-0"
 
 [dependencies]
