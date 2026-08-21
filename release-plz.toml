@@ -11,9 +11,9 @@ git_release_type = "auto"
 git_release_draft = true
 git_release_latest = false
 
-# Only release after the release PR is merged. Ordinary pushes merely update the
-# release PR, so an arbitrary commit on main cannot be released accidentally.
-release_always = false
+# Bootstrap the initial v0.0.1 release because Cargo.toml already had that
+# version before the first release PR. Restore this to false after v0.0.1 exists.
+release_always = true
 
 # Keep dependency upgrades separate from release preparation.
 dependencies_update = false
