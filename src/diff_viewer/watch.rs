@@ -108,6 +108,14 @@ impl DiffViewer {
                     .then_some(index)
             })
             .collect();
+        let current_paths = self
+            .diff
+            .files
+            .iter()
+            .map(|file| file.display_path().to_owned())
+            .collect::<HashSet<_>>();
+        self.viewed_files
+            .retain(|path| current_paths.contains(path));
         self.context_expansions.clear();
         self.text_selection = None;
         self.header_text_selection = None;

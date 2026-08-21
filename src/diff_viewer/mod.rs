@@ -104,6 +104,7 @@ actions!(
     [
         ToggleLayout,
         ToggleTheme,
+        ToggleViewed,
         NextFile,
         PreviousFile,
         CopyTextSelection
@@ -530,6 +531,7 @@ struct DiffViewer {
     file_tree_row_offsets: Vec<Pixels>,
     collapsed_directories: HashSet<String>,
     collapsed_files: HashSet<usize>,
+    viewed_files: HashSet<String>,
     context_expansions: HashMap<ContextGap, ContextExpansion>,
     pending_scroll_file: Option<usize>,
     pending_diff_zoom_anchor: Option<DiffZoomAnchor>,
@@ -639,6 +641,7 @@ impl DiffViewer {
             file_tree_row_offsets,
             collapsed_directories: HashSet::new(),
             collapsed_files,
+            viewed_files: HashSet::new(),
             context_expansions,
             pending_scroll_file: None,
             pending_diff_zoom_anchor: None,
@@ -773,6 +776,9 @@ impl Render for DiffViewer {
             )
             .on_action(cx.listener(|this, _: &ToggleLayout, _, cx| this.toggle_layout(cx)))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
+            .on_action(cx.listener(|this, _: &ToggleViewed, _, cx| {
+                this.toggle_selected_file_viewed(cx);
+            }))
             .on_action(cx.listener(|this, _: &NextFile, _, cx| this.next_file(cx)))
             .on_action(cx.listener(|this, _: &PreviousFile, _, cx| this.previous_file(cx)))
             .on_action(
@@ -813,6 +819,7 @@ pub(super) fn run(launch: Launch) {
         cx.bind_keys([
             KeyBinding::new("s", ToggleLayout, Some("DiffViewer")),
             KeyBinding::new("shift-t", ToggleTheme, Some("DiffViewer")),
+            KeyBinding::new("v", ToggleViewed, Some("DiffViewer")),
             KeyBinding::new("down", NextFile, Some("DiffViewer")),
             KeyBinding::new("up", PreviousFile, Some("DiffViewer")),
             KeyBinding::new("ctrl-c", CopyTextSelection, Some("DiffViewer")),

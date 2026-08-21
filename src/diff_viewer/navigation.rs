@@ -8,6 +8,35 @@ use super::{
 };
 
 impl DiffViewer {
+    pub(super) fn is_file_viewed(&self, file_index: usize) -> bool {
+        self.file_meta
+            .get(file_index)
+            .is_some_and(|file| self.viewed_files.contains(file.display_path.as_ref()))
+    }
+
+    pub(super) fn toggle_file_viewed(&mut self, file_index: usize, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .file_meta
+            .get(file_index)
+            .map(|file| file.display_path.to_string())
+        else {
+            return;
+        };
+        let marking_viewed = !self.viewed_files.remove(&path);
+        if marking_viewed {
+            self.viewed_files.insert(path);
+        }
+        if marking_viewed && !self.collapsed_files.contains(&file_index) {
+            self.toggle_file_collapsed(file_index, false, cx);
+            return;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn toggle_selected_file_viewed(&mut self, cx: &mut Context<Self>) {
+        self.toggle_file_viewed(self.selected_file, cx);
+    }
+
     pub(super) fn toggle_layout(&mut self, cx: &mut Context<Self>) {
         self.text_selection = None;
         self.header_text_selection = None;

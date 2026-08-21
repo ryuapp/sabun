@@ -7,7 +7,7 @@ use super::{
     TREE_SCROLLBAR_GAP, VirtualizedColumn, Window, clamped_sidebar_width, div, language_color, px,
     sidebar_file_name_width, sticky_file_tree_directories, variable_visible_range, with_alpha,
 };
-use crate::icons::{DISCLOSURE_ICON_SIZE, disclosure_icon};
+use crate::icons::{DISCLOSURE_ICON_SIZE, check_icon, disclosure_icon};
 
 impl DiffViewer {
     pub(super) fn start_sidebar_resize(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
@@ -300,6 +300,7 @@ impl DiffViewer {
         let indent = px((depth as f32).mul_add(14., 12.));
         let file_name_width = sidebar_file_name_width(self.sidebar_width, depth);
         let file_name = file_meta.file_name.clone();
+        let viewed = self.is_file_viewed(index);
 
         div()
             .id(("file", index))
@@ -320,7 +321,20 @@ impl DiffViewer {
             )
             .on_click(cx.listener(move |this, _, _, cx| this.select_file(index, cx)))
             .child(div().w(indent).flex_none())
-            .child(div().size(px(8.)).rounded_full().bg(icon_color))
+            .child(
+                div()
+                    .size(px(12.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(viewed, |indicator| {
+                        indicator.child(check_icon(palette.green, px(13.)))
+                    })
+                    .when(!viewed, |indicator| {
+                        indicator.child(div().size(px(8.)).rounded_full().bg(icon_color))
+                    }),
+            )
             .child(
                 div()
                     .w(file_name_width)
@@ -331,7 +345,7 @@ impl DiffViewer {
                     .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .text_sm()
                     .font_weight(FontWeight::NORMAL)
-                    .text_color(palette.text)
+                    .text_color(if viewed { palette.muted } else { palette.text })
                     .child(file_name),
             )
             .child(
