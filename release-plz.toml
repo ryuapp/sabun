@@ -25,3 +25,26 @@ semver_check = false
 [changelog]
 protect_breaking_commits = true
 sort_commits = "oldest"
+# Feature branches only need conventional commits. The release PR generates these entries and
+# links the pull request associated with each commit when GitHub supplies one.
+body = """
+## [{{ version }}]\
+    {%- if release_link -%}\
+        ({{ release_link }})\
+    {% endif %} \
+    - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+          {% if commit.breaking %}[**breaking**] {% endif %}\
+          {{ commit.message | upper_first }}\
+          {%- if commit.remote.pr_number %} \
+              ([#{{ commit.remote.pr_number }}]({{ remote.link }}/pull/{{ commit.remote.pr_number }}))\
+          {% endif %}\
+          {%- if commit.links %} \
+              ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}) {% endfor -%})\
+          {% endif %}
+    {% endfor -%}
+{% endfor %}
+"""
