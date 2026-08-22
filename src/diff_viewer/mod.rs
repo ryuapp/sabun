@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::cli::{Input, Launch, WatchRequest};
+use crate::cli::{GitDiffSourceSwitcher, GitSourceCatalog, Input, Launch, WatchRequest};
 use crate::diff::{DiffFile, DiffHunk, DiffLine, DiffSet, LineKind};
 use crate::icons::{ExpandIconDirection, ThemeIcon, context_expand_icon, theme_icon};
 use gpui::prelude::FluentBuilder;
@@ -18,7 +18,7 @@ use gpui::{
     ScrollDelta, ScrollHandle, ScrollWheelEvent, SharedString, Size, StatefulInteractiveElement,
     Styled, StyledText, Subscription, TextRun, TitlebarOptions, Window, WindowBounds,
     WindowOptions, actions, canvas, combine_highlights, div, ease_out_quint, fill, font, point, px,
-    rgb, size,
+    relative, rgb, size,
 };
 use similar::{
     Algorithm, ChangeTag,
@@ -41,6 +41,7 @@ mod row_geometry;
 mod scroll;
 mod scrollbar;
 mod sidebar;
+mod source_picker;
 mod split_view;
 mod syntax;
 #[cfg(test)]
@@ -117,9 +118,18 @@ enum DiffLayout {
     Unified,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum SourcePickerSection {
+    #[default]
+    Changes,
+    History,
+    Stashes,
+}
+
 const DEFAULT_DIFF_LAYOUT: DiffLayout = DiffLayout::Unified;
 const SCROLLBAR_WIDTH: f32 = 16.;
 const FILE_SCROLLBAR_WIDTH: f32 = SCROLLBAR_WIDTH / 2.;
+const SOURCE_PICKER_SCROLLBAR_WIDTH: f32 = 10.;
 const TREE_SCROLLBAR_GAP: f32 = 2.;
 const TREE_DIRECTORY_ROW_HEIGHT: f32 = 28.;
 const TREE_FILE_ROW_HEIGHT: f32 = 28.;
@@ -150,13 +160,23 @@ enum ScrollbarAxis {
 enum ScrollbarTarget {
     Files,
     DiffVertical,
+    SourcePicker,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum SourceCatalogLoadState {
+    #[default]
+    Idle,
+    Initial,
+    MoreHistory,
 }
 
 impl ScrollbarTarget {
-    const fn smooth_target(self) -> SmoothScrollTarget {
+    const fn smooth_target(self) -> Option<SmoothScrollTarget> {
         match self {
-            Self::Files => SmoothScrollTarget::Files,
-            Self::DiffVertical => SmoothScrollTarget::Diff,
+            Self::Files => Some(SmoothScrollTarget::Files),
+            Self::DiffVertical => Some(SmoothScrollTarget::Diff),
+            Self::SourcePicker => None,
         }
     }
 }
@@ -500,6 +520,14 @@ struct DiffViewer {
     header_text_selection: Option<HeaderTextSelection>,
     text_context_menu: Option<Point<Pixels>>,
     path_context_menu: Option<PathContextMenu>,
+    source_switcher: Option<GitDiffSourceSwitcher>,
+    source_picker_open: bool,
+    source_picker_section: SourcePickerSection,
+    source_picker_scroll: ScrollHandle,
+    source_catalog: Option<GitSourceCatalog>,
+    source_catalog_load_state: SourceCatalogLoadState,
+    source_catalog_generation: u64,
+    source_error: Option<String>,
     copy_path_feedback: Option<CopyPathFeedback>,
     copy_path_feedback_generation: u64,
     focus_handle: FocusHandle,
@@ -550,6 +578,7 @@ impl DiffViewer {
     fn new(
         input: Input,
         watch: Option<WatchRequest>,
+        source_switcher: Option<GitDiffSourceSwitcher>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -610,6 +639,14 @@ impl DiffViewer {
             header_text_selection: None,
             text_context_menu: None,
             path_context_menu: None,
+            source_switcher,
+            source_picker_open: false,
+            source_picker_section: SourcePickerSection::default(),
+            source_picker_scroll: ScrollHandle::new(),
+            source_catalog: None,
+            source_catalog_load_state: SourceCatalogLoadState::default(),
+            source_catalog_generation: 0,
+            source_error: None,
             copy_path_feedback: None,
             copy_path_feedback_generation: 0,
             focus_handle,
@@ -748,6 +785,9 @@ impl Render for DiffViewer {
             .path_context_menu
             .as_ref()
             .map(|menu| self.render_path_context_menu(menu, window.viewport_size(), palette, cx));
+        let source_picker = self
+            .source_picker_open
+            .then(|| self.render_source_picker(palette, cx));
 
         div()
             .key_context("DiffViewer")
@@ -809,11 +849,16 @@ impl Render for DiffViewer {
             )
             .children(text_context_menu)
             .children(path_context_menu)
+            .children(source_picker)
     }
 }
 
 pub(super) fn run(launch: Launch) {
-    let Launch { input, watch } = launch;
+    let Launch {
+        input,
+        watch,
+        source_switcher,
+    } = launch;
     Application::new().run(move |cx: &mut App| {
         crate::application_icon::install();
         cx.bind_keys([
@@ -844,7 +889,15 @@ pub(super) fn run(launch: Launch) {
                 ..Default::default()
             },
             move |window, cx| {
-                cx.new(|cx| DiffViewer::new(input.clone(), watch.clone(), window, cx))
+                cx.new(|cx| {
+                    DiffViewer::new(
+                        input.clone(),
+                        watch.clone(),
+                        source_switcher.clone(),
+                        window,
+                        cx,
+                    )
+                })
             },
         )
         .unwrap();

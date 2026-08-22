@@ -40,6 +40,27 @@ fn viewed_progress_gauge(progress: f32, palette: Palette) -> impl IntoElement {
 }
 
 impl DiffViewer {
+    fn render_source_selector(&self, palette: Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let Some(source_switcher) = &self.source_switcher else {
+            return div().into_any_element();
+        };
+        div()
+            .id("source-selector")
+            .h(px(32.))
+            .px_3()
+            .rounded_md()
+            .border_1()
+            .border_color(palette.border)
+            .bg(palette.elevated)
+            .flex()
+            .items_center()
+            .text_color(palette.text)
+            .hover(|button| button.bg(palette.hover))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_source_picker(cx)))
+            .child(source_switcher.source().label())
+            .into_any_element()
+    }
+
     pub(super) fn render_top_bar(
         &mut self,
         palette: Palette,
@@ -80,6 +101,11 @@ impl DiffViewer {
                             .font_weight(FontWeight::MEDIUM)
                             .child(self.source_name.clone()),
                     )
+                    .when(self.source_switcher.is_some(), |header| {
+                        header
+                            .child(div().h(px(24.)).w(px(1.)).bg(palette.border))
+                            .child(self.render_source_selector(palette, cx))
+                    })
                     .child(div().text_color(palette.faint).child("/"))
                     .child(
                         div()

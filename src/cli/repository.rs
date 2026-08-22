@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Object, Oid, Repository, Tree};
+use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Object, Oid, Repository, Sort, Tree};
 
-use super::Input;
+use super::{GitCommitPage, GitCommitSource, GitSourceCatalog, GitStashSource, Input};
 use crate::diff::{DiffSet, from_git_diff};
 
 const DIFF_CONTEXT_LINES: u32 = 3;
+const COMMIT_HISTORY_PAGE_SIZE: usize = 50;
 
 pub(super) struct DiffRequest<'a> {
     pub(super) target: Option<&'a str>,
@@ -208,6 +209,75 @@ pub(super) fn watch_paths(start: &Path) -> Result<Vec<PathBuf>, String> {
         paths.push(git_dir);
     }
     Ok(paths)
+}
+
+pub(super) fn load_source_catalog(start: &Path) -> Result<GitSourceCatalog, String> {
+    let mut repository = discover(start)?;
+    let GitCommitPage { commits, has_more } = commit_page(&repository, 0)?;
+
+    let mut stashes = Vec::new();
+    repository
+        .stash_foreach(|index, message, oid| {
+            stashes.push(GitStashSource {
+                reference: format!("stash@{{{index}}}"),
+                short_oid: short_oid(*oid),
+                summary: message.to_owned(),
+            });
+            true
+        })
+        .map_err(|error| format!("Could not read stash history: {error}"))?;
+
+    Ok(GitSourceCatalog {
+        commits,
+        has_more_commits: has_more,
+        stashes,
+    })
+}
+
+pub(super) fn load_commit_page(start: &Path, offset: usize) -> Result<GitCommitPage, String> {
+    let repository = discover(start)?;
+    commit_page(&repository, offset)
+}
+
+fn commit_page(repository: &Repository, offset: usize) -> Result<GitCommitPage, String> {
+    let mut commits = Vec::new();
+    let mut revwalk = repository
+        .revwalk()
+        .map_err(|error| format!("Could not read commit history: {error}"))?;
+    match revwalk.push_head() {
+        Ok(()) => {
+            revwalk
+                .set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
+                .map_err(|error| format!("Could not sort commit history: {error}"))?;
+            for oid in revwalk.skip(offset).take(COMMIT_HISTORY_PAGE_SIZE + 1) {
+                let oid = oid.map_err(|error| format!("Could not walk commit history: {error}"))?;
+                let commit = repository
+                    .find_commit(oid)
+                    .map_err(|error| format!("Could not read commit {oid}: {error}"))?;
+                commits.push(GitCommitSource {
+                    oid: oid.to_string(),
+                    short_oid: short_oid(oid),
+                    summary: commit
+                        .summary()
+                        .ok()
+                        .flatten()
+                        .unwrap_or("Untitled commit")
+                        .to_owned(),
+                    author: commit
+                        .author()
+                        .name()
+                        .unwrap_or("Unknown author")
+                        .to_owned(),
+                });
+            }
+        }
+        Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {}
+        Err(error) => return Err(format!("Could not read HEAD: {error}")),
+    }
+
+    let has_more = commits.len() > COMMIT_HISTORY_PAGE_SIZE;
+    commits.truncate(COMMIT_HISTORY_PAGE_SIZE);
+    Ok(GitCommitPage { commits, has_more })
 }
 
 fn diff_options(include_untracked: bool, pathspecs: &[String]) -> DiffOptions {

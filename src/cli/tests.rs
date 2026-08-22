@@ -7,7 +7,9 @@ use std::{
 
 use git2::{IndexAddOption, Repository, Signature};
 
-use super::{WatchRequest, execute, execute_options, repository};
+use super::{
+    GitDiffSource, WatchRequest, execute, execute_options, git_source_switcher, repository,
+};
 use crate::cli::arguments::{
     Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, options,
 };
@@ -311,6 +313,7 @@ fn watch_request_reloads_repository_diff() {
             }),
         },
         &fixture.root,
+        None,
     )
     .unwrap();
     assert_eq!(watch.paths(), [fixture.root.as_path()]);
@@ -318,6 +321,98 @@ fn watch_request_reloads_repository_diff() {
     fs::write(fixture.root.join("tracked.txt"), "watched change\n").unwrap();
     let loaded = watch.reload().unwrap();
     assert_paths(&loaded.diff.files, &["tracked.txt"]);
+}
+
+#[test]
+fn git_source_switcher_loads_changes_staged_commit_and_stash() {
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("tracked.txt"), "working tree\n").unwrap();
+    fs::write(fixture.root.join("staged.txt"), "staged\n").unwrap();
+    stage(&fixture.root, "staged.txt");
+    fs::write(fixture.root.join("stash.txt"), "stash\n").unwrap();
+    stage(&fixture.root, "stash.txt");
+    let mut repository = Repository::open(&fixture.root).unwrap();
+    repository
+        .stash_save(&signature(), "test stash", None)
+        .unwrap();
+    fs::write(fixture.root.join("tracked.txt"), "working tree again\n").unwrap();
+
+    let options = Options {
+        repo: None,
+        command: Command::Diff(DiffOptions {
+            watch: false,
+            staged: false,
+            exclude_untracked: false,
+            targets: Vec::new(),
+            pathspecs: Vec::new(),
+        }),
+    };
+    let switcher = git_source_switcher(&options, &fixture.root).unwrap();
+    assert_eq!(switcher.source(), GitDiffSource::Changes);
+    let catalog = switcher.catalog().unwrap();
+    assert_eq!(catalog.commits.len(), 1);
+    assert!(!catalog.has_more_commits);
+    assert_eq!(catalog.commits[0].summary, "initial");
+    assert_eq!(catalog.stashes.len(), 1);
+    assert_eq!(catalog.stashes[0].reference, "stash@{0}");
+    assert_paths(
+        &switcher
+            .switch_to(GitDiffSource::Staged(None))
+            .unwrap()
+            .diff
+            .files,
+        &[],
+    );
+    assert_eq!(switcher.source(), GitDiffSource::Staged(None));
+    assert_paths(
+        &switcher
+            .switch_to(GitDiffSource::Commit(None))
+            .unwrap()
+            .diff
+            .files,
+        &["tracked.txt"],
+    );
+    assert_paths(
+        &switcher
+            .switch_to(GitDiffSource::Stash(None))
+            .unwrap()
+            .diff
+            .files,
+        &["staged.txt", "stash.txt", "tracked.txt"],
+    );
+    assert_paths(
+        &switcher
+            .switch_to(GitDiffSource::Changes)
+            .unwrap()
+            .diff
+            .files,
+        &["tracked.txt"],
+    );
+}
+
+#[test]
+fn commit_history_loads_in_pages() {
+    let fixture = Fixture::new();
+    for index in 0..55 {
+        fs::write(
+            fixture.root.join("tracked.txt"),
+            format!("history {index}\n"),
+        )
+        .unwrap();
+        fixture.commit_all(&format!("history {index}"));
+    }
+
+    let first = repository::load_commit_page(&fixture.root, 0).unwrap();
+    assert_eq!(first.commits.len(), 50);
+    assert!(first.has_more);
+    assert_eq!(first.commits.first().unwrap().summary, "history 54");
+    assert_eq!(first.commits.last().unwrap().summary, "history 5");
+
+    let second = repository::load_commit_page(&fixture.root, first.commits.len()).unwrap();
+    assert_eq!(second.commits.len(), 6);
+    assert!(!second.has_more);
+    assert_eq!(second.commits.first().unwrap().summary, "history 4");
+    assert_eq!(second.commits.last().unwrap().summary, "initial");
 }
 
 #[test]

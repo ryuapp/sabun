@@ -2,9 +2,9 @@ use super::scroll::scrollbar_max_offset;
 use super::{
     Context, CursorStyle, DiffViewer, FILE_SCROLLBAR_WIDTH, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Palette, ParentElement,
-    SCROLLBAR_WIDTH, ScrollHandle, ScrollbarAxis, ScrollbarDrag, ScrollbarTarget, Styled, canvas,
-    div, fill, px, scrollbar_axis_length, scrollbar_axis_position, scrollbar_axis_start,
-    scrollbar_metrics, set_scrollbar_offset, with_alpha,
+    SCROLLBAR_WIDTH, SOURCE_PICKER_SCROLLBAR_WIDTH, ScrollHandle, ScrollbarAxis, ScrollbarDrag,
+    ScrollbarTarget, Styled, canvas, div, fill, px, scrollbar_axis_length, scrollbar_axis_position,
+    scrollbar_axis_start, scrollbar_metrics, set_scrollbar_offset, with_alpha,
 };
 use gpui::DispatchPhase;
 
@@ -23,10 +23,12 @@ impl DiffViewer {
         let id = match target {
             ScrollbarTarget::Files => "files-scrollbar",
             ScrollbarTarget::DiffVertical => "diff-vertical-scrollbar",
+            ScrollbarTarget::SourcePicker => "source-picker-scrollbar",
         };
         let width = match target {
             ScrollbarTarget::Files => FILE_SCROLLBAR_WIDTH,
             ScrollbarTarget::DiffVertical => SCROLLBAR_WIDTH,
+            ScrollbarTarget::SourcePicker => SOURCE_PICKER_SCROLLBAR_WIDTH,
         };
         let blocks_mouse = scrollbar_max_offset(axis, &scroll_handle) > px(0.);
 
@@ -82,12 +84,15 @@ impl DiffViewer {
                             inside_thumb
                         };
 
-                        down_entity.update(cx, |this, _| {
+                        down_entity.update(cx, |this, cx| {
                             this.cancel_smooth_scroll(target);
                             this.scrollbar_drag = Some(ScrollbarDrag {
                                 target,
                                 inside_thumb,
                             });
+                            if target == ScrollbarTarget::SourcePicker {
+                                this.maybe_load_more_history(cx);
+                            }
                         });
                         cx.notify(down_entity.entity_id());
                     });
@@ -132,7 +137,12 @@ impl DiffViewer {
                             / travel)
                             .clamp(0., 1.);
                         set_scrollbar_offset(&move_handle, axis, -(max_offset * percentage));
-                        move_entity.update(cx, |this, _| this.cancel_smooth_scroll(target));
+                        move_entity.update(cx, |this, cx| {
+                            this.cancel_smooth_scroll(target);
+                            if target == ScrollbarTarget::SourcePicker {
+                                this.maybe_load_more_history(cx);
+                            }
+                        });
                         cx.notify(move_entity.entity_id());
                     });
                 },
@@ -142,7 +152,9 @@ impl DiffViewer {
 
         let scrollbar = match target {
             ScrollbarTarget::Files => scrollbar,
-            ScrollbarTarget::DiffVertical => scrollbar.cursor(CursorStyle::Arrow),
+            ScrollbarTarget::DiffVertical | ScrollbarTarget::SourcePicker => {
+                scrollbar.cursor(CursorStyle::Arrow)
+            }
         };
 
         match axis {
