@@ -30,6 +30,9 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Setup Ubuntu for GPUI
+        uses: ./.github/actions/setup-ubuntu-for-gpui
+
       - name: Release merged release PR
         id: release-plz
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
@@ -80,11 +83,9 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: Install Linux build dependencies
+      - name: Setup Ubuntu for GPUI
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang libwayland-dev libxkbcommon-x11-dev libvulkan-dev
+        uses: ./.github/actions/setup-ubuntu-for-gpui
 
       - name: Build Sabun
         run: cargo build --release --locked --target ${{ matrix.target }}
@@ -161,6 +162,9 @@ jobs:
     steps:
       - *checkout
       - *rust
+
+      - name: Setup Ubuntu for GPUI
+        uses: ./.github/actions/setup-ubuntu-for-gpui
 
       - name: Create or update release PR
         uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131

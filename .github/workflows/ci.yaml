@@ -23,10 +23,8 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang libwayland-dev libxkbcommon-x11-dev libvulkan-dev
+      - name: Setup Ubuntu for GPUI
+        uses: ./.github/actions/setup-ubuntu-for-gpui
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -57,11 +55,9 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: Install Linux build dependencies
+      - name: Setup Ubuntu for GPUI
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang libwayland-dev libxkbcommon-x11-dev libvulkan-dev
+        uses: ./.github/actions/setup-ubuntu-for-gpui
 
       - name: Run tests
         run: cargo test --locked --target ${{ matrix.target }}

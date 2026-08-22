@@ -1,0 +1,11 @@
+name: Setup Ubuntu for GPUI
+description: Install the native Ubuntu packages required to build GPUI applications.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Linux build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes clang libwayland-dev libxkbcommon-x11-dev libvulkan-dev
