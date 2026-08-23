@@ -417,12 +417,12 @@ fn git_source_switcher_discovers_and_switches_linked_worktrees() {
             .iter()
             .any(|worktree| worktree.path == fixture.root)
     );
-    assert!(
-        switcher
-            .worktrees()
-            .iter()
-            .any(|worktree| worktree.path == linked && worktree.branch == "linked")
-    );
+    let linked_worktree = switcher
+        .worktrees()
+        .iter()
+        .find(|worktree| worktree.path == linked)
+        .unwrap();
+    assert_eq!(linked_worktree.branch, "linked");
 
     let input = switcher.switch_worktree(linked.clone()).unwrap();
     assert_eq!(switcher.source(), GitDiffSource::Changes);
@@ -713,7 +713,11 @@ impl Fixture {
         let mut options = WorktreeAddOptions::new();
         options.reference(Some(&reference));
         repository.worktree(name, &path, Some(&options)).unwrap();
-        path
+        Repository::open(&path)
+            .unwrap()
+            .workdir()
+            .unwrap()
+            .to_owned()
     }
 }
 
