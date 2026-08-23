@@ -13,9 +13,8 @@ use std::{
 use similar::TextDiff;
 
 use crate::diff::{DiffSet, parse_unified_diff};
-use arguments::{
-    Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, parse,
-};
+pub(super) use arguments::Options;
+use arguments::{Command, DiffOptions, PatchOptions, ShowOptions, StashShowOptions};
 use repository::{
     DiffRequest, load_commit_page, load_diff, load_show, load_source_catalog, load_stash,
     watch_paths,
@@ -197,8 +196,11 @@ impl WatchRequest {
     }
 }
 
-pub(super) fn load() -> Result<Launch, String> {
-    let options = parse();
+pub(super) fn parse() -> Options {
+    arguments::parse()
+}
+
+pub(super) fn load(options: Options) -> Result<Launch, String> {
     let directory = std::env::current_dir()
         .map_err(|error| format!("Could not read the current directory: {error}"))?;
     let stdin = io::stdin();

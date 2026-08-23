@@ -5,7 +5,7 @@ use bpaf::{Parser, construct, long, positional, short};
 const VERSION_TEXT: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct Options {
+pub(crate) struct Options {
     pub(super) repo: Option<PathBuf>,
     pub(super) command: Command,
 }
