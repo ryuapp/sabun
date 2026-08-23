@@ -1,8 +1,6 @@
+#[cfg(test)]
+use std::ffi::OsStr;
 use std::path::PathBuf;
-
-use bpaf::{Parser, construct, long, positional, short};
-
-const VERSION_TEXT: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Options {
@@ -18,149 +16,127 @@ pub(super) enum Command {
     Patch(PatchOptions),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum CliAction {
-    Run(Options),
-    Version,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, usage::Args)]
 pub(super) struct DiffOptions {
+    /// Reload the diff when watched files change.
+    #[usage(long)]
     pub(super) watch: bool,
+
+    /// Show staged changes.
+    #[usage(long)]
     pub(super) staged: bool,
+
+    /// Do not include untracked files.
+    #[usage(long)]
     pub(super) exclude_untracked: bool,
+
+    /// Revision, range, or two files to compare.
+    #[usage(name = "TARGET")]
     pub(super) targets: Vec<String>,
+
+    /// Limit the diff to paths after --.
+    #[usage(name = "PATHSPEC", double_dash = "required")]
     pub(super) pathspecs: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, usage::Args)]
 pub(super) struct ShowOptions {
+    /// Commit to show (defaults to HEAD).
+    #[usage(name = "TARGET")]
     pub(super) target: Option<String>,
+
+    /// Limit the commit diff to paths after --.
+    #[usage(name = "PATHSPEC", double_dash = "required")]
     pub(super) pathspecs: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, usage::Args)]
 pub(super) struct StashShowOptions {
+    /// Stash reference (defaults to stash@{0}).
+    #[usage(name = "REF")]
     pub(super) reference: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, usage::Args)]
 pub(super) struct PatchOptions {
+    /// Unified diff file; omit or use - to read stdin.
+    #[usage(name = "FILE")]
     pub(super) file: Option<PathBuf>,
 }
 
-fn diff_parser() -> impl Parser<Command> {
-    let watch = long("watch")
-        .help("Reload the diff when watched files change")
-        .switch();
-    let staged = long("staged").help("Show staged changes").switch();
-    let exclude_untracked = long("exclude-untracked")
-        .help("Do not include untracked files")
-        .switch();
-    let targets = positional::<String>("TARGET")
-        .help("Revision, range, or two files to compare")
-        .non_strict()
-        .many();
-    let pathspecs = positional::<String>("PATHSPEC")
-        .help("Limit the diff to paths after --")
-        .strict()
-        .many();
+/// GPU-accelerated Git diff viewer.
+#[derive(Debug, usage::Cli)]
+#[usage(bin = "sabun", version, unknown_flags = "error")]
+struct CliOptions {
+    /// Select the repository for Git-backed commands.
+    #[usage(long, global, value_name = "PATH")]
+    repo: Option<PathBuf>,
 
-    construct!(DiffOptions {
-        watch,
-        staged,
-        exclude_untracked,
-        targets,
-        pathspecs,
-    })
-    .map(Command::Diff)
-    .to_options()
-    .descr("Show working-tree, staged, revision, or file changes")
-    .command("diff")
+    #[usage(subcommand)]
+    command: CliCommand,
 }
 
-fn show_parser() -> impl Parser<Command> {
-    let target = positional::<String>("TARGET")
-        .help("Commit to show (defaults to HEAD)")
-        .non_strict()
-        .optional();
-    let pathspecs = positional::<String>("PATHSPEC")
-        .help("Limit the commit diff to paths after --")
-        .strict()
-        .many();
+#[derive(Debug, usage::Subcommands)]
+enum CliCommand {
+    /// Show working-tree, staged, revision, or file changes.
+    Diff(DiffOptions),
 
-    construct!(ShowOptions { target, pathspecs })
-        .map(Command::Show)
-        .to_options()
-        .descr("Show the changes introduced by a commit")
-        .command("show")
+    /// Show the changes introduced by a commit.
+    Show(ShowOptions),
+
+    /// Inspect Git stashes.
+    Stash(StashOptions),
+
+    /// Show a unified diff file or stdin.
+    Patch(PatchOptions),
 }
 
-fn stash_parser() -> impl Parser<Command> {
-    let reference = positional::<String>("REF")
-        .help("Stash reference (defaults to stash@{0})")
-        .optional();
-    let show = construct!(StashShowOptions { reference })
-        .map(Command::StashShow)
-        .to_options()
-        .descr("Show the changes stored in a stash")
-        .command("show");
-
-    show.to_options()
-        .descr("Inspect Git stashes")
-        .command("stash")
+#[derive(Debug, usage::Args)]
+struct StashOptions {
+    #[usage(subcommand)]
+    command: StashCommand,
 }
 
-fn patch_parser() -> impl Parser<Command> {
-    let file = positional::<PathBuf>("FILE")
-        .help("Unified diff file; omit or use - to read stdin")
-        .optional();
-
-    construct!(PatchOptions { file })
-        .map(Command::Patch)
-        .to_options()
-        .descr("Show a unified diff file or stdin")
-        .command("patch")
+#[derive(Debug, usage::Subcommands)]
+enum StashCommand {
+    /// Show the changes stored in a stash.
+    Show(StashShowOptions),
 }
 
-fn command_parser() -> impl Parser<Command> {
-    construct!([diff_parser(), show_parser(), stash_parser(), patch_parser(),])
-}
-
-fn options_parser() -> impl Parser<Options> {
-    let repo = long("repo")
-        .help("Select the repository for Git-backed commands")
-        .argument::<PathBuf>("PATH")
-        .optional();
-    let command = command_parser();
-
-    construct!(Options { repo, command })
+impl From<CliOptions> for Options {
+    fn from(options: CliOptions) -> Self {
+        Self {
+            repo: options.repo,
+            command: match options.command {
+                CliCommand::Diff(options) => Command::Diff(options),
+                CliCommand::Show(options) => Command::Show(options),
+                CliCommand::Stash(StashOptions {
+                    command: StashCommand::Show(options),
+                }) => Command::StashShow(options),
+                CliCommand::Patch(options) => Command::Patch(options),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
-pub(super) fn options() -> bpaf::OptionParser<Options> {
-    options_parser()
-        .to_options()
-        .descr("GPU-accelerated Git diff viewer")
-        .fallback_to_usage()
+pub(super) fn parse_from(args: &[&str]) -> Result<Options, String> {
+    let args = args.iter().map(OsStr::new).collect::<Vec<_>>();
+    CliOptions::parse_from(&args)
+        .map(Options::from)
+        .map_err(|error| format!("{error:?}"))
 }
 
 pub(super) fn parse() -> Options {
-    let version = short('V')
-        .long("version")
-        .help("Print version information")
-        .req_flag(CliAction::Version);
-    let run = options_parser().map(CliAction::Run);
-    let parser = construct!([version, run])
-        .to_options()
-        .descr("GPU-accelerated Git diff viewer")
-        .fallback_to_usage();
+    CliOptions::parse().into()
+}
 
-    match parser.run() {
-        CliAction::Run(options) => options,
-        CliAction::Version => {
-            println!("{VERSION_TEXT}");
-            std::process::exit(0);
-        }
+#[cfg(test)]
+mod tests {
+    use super::CliOptions;
+
+    #[test]
+    fn generated_usage_spec_is_coherent() {
+        assert!(!CliOptions::to_kdl().is_empty());
     }
 }
