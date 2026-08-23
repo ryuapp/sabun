@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use git2::{IndexAddOption, Repository, Signature};
+use git2::{IndexAddOption, Repository, Signature, WorktreeAddOptions};
 
 use super::{
     GitDiffSource, WatchRequest, execute, execute_options, git_source_switcher, repository,
@@ -707,7 +707,12 @@ impl Fixture {
     fn add_worktree(&self, name: &str) -> PathBuf {
         let path = self.cleanup_root.join(name);
         let repository = Repository::open(&self.root).unwrap();
-        repository.worktree(name, &path, None).unwrap();
+        let head = repository.head().unwrap().peel_to_commit().unwrap();
+        let branch = repository.branch(name, &head, false).unwrap();
+        let reference = branch.into_reference();
+        let mut options = WorktreeAddOptions::new();
+        options.reference(Some(&reference));
+        repository.worktree(name, &path, Some(&options)).unwrap();
         path
     }
 }
