@@ -439,7 +439,10 @@ impl DiffViewer {
     }
 
     pub(super) fn cancel_smooth_scroll(&mut self, target: ScrollbarTarget) {
-        let (scroll_handle, state) = self.smooth_scroll_parts(target.smooth_target());
+        let Some(smooth_target) = target.smooth_target() else {
+            return;
+        };
+        let (scroll_handle, state) = self.smooth_scroll_parts(smooth_target);
         state.stop_at(scroll_handle.offset());
     }
 }

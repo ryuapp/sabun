@@ -7,6 +7,7 @@ use std::{
     fs,
     io::{self, Cursor, Read},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use similar::TextDiff;
@@ -15,7 +16,10 @@ use crate::diff::{DiffSet, parse_unified_diff};
 use arguments::{
     Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, parse,
 };
-use repository::{DiffRequest, load_diff, load_show, load_stash, watch_paths};
+use repository::{
+    DiffRequest, load_commit_page, load_diff, load_show, load_source_catalog, load_stash,
+    watch_paths,
+};
 
 #[derive(Clone)]
 pub(super) struct Input {
@@ -31,12 +35,150 @@ pub(super) struct Input {
 pub(super) struct Launch {
     pub(super) input: Input,
     pub(super) watch: Option<WatchRequest>,
+    pub(super) source_switcher: Option<GitDiffSourceSwitcher>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum GitDiffSource {
+    Changes,
+    Staged(Option<String>),
+    Comparison(String),
+    Commit(Option<String>),
+    Stash(Option<String>),
+}
+
+impl GitDiffSource {
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::Changes => "Changes".into(),
+            Self::Staged(_) => "Staged changes".into(),
+            Self::Comparison(target) => format!("Compare {target}"),
+            Self::Commit(Some(target)) => format!("Commit {}", abbreviated(target)),
+            Self::Commit(None) => "Latest commit".into(),
+            Self::Stash(Some(reference)) => reference.clone(),
+            Self::Stash(None) => "Latest stash".into(),
+        }
+    }
+}
+
+fn abbreviated(value: &str) -> &str {
+    value.get(..7).unwrap_or(value)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GitCommitSource {
+    pub(crate) oid: String,
+    pub(crate) short_oid: String,
+    pub(crate) summary: String,
+    pub(crate) author: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GitStashSource {
+    pub(crate) reference: String,
+    pub(crate) short_oid: String,
+    pub(crate) summary: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GitCommitPage {
+    pub(crate) commits: Vec<GitCommitSource>,
+    pub(crate) has_more: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GitSourceCatalog {
+    pub(crate) commits: Vec<GitCommitSource>,
+    pub(crate) has_more_commits: bool,
+    pub(crate) stashes: Vec<GitStashSource>,
+}
+
+#[derive(Clone)]
+pub(crate) struct GitDiffSourceSwitcher {
+    directory: PathBuf,
+    source: Arc<Mutex<GitDiffSource>>,
+    include_untracked: bool,
+    pathspecs: Vec<String>,
+}
+
+impl GitDiffSourceSwitcher {
+    pub(crate) fn source(&self) -> GitDiffSource {
+        self.source
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn switch_to(&self, source: GitDiffSource) -> Result<Input, String> {
+        let input = self.load_source(&source)?;
+        *self
+            .source
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = source;
+        Ok(input)
+    }
+
+    pub(crate) fn catalog(&self) -> Result<GitSourceCatalog, String> {
+        load_source_catalog(&self.directory)
+    }
+
+    pub(crate) fn commit_page(&self, offset: usize) -> Result<GitCommitPage, String> {
+        load_commit_page(&self.directory, offset)
+    }
+
+    fn reload(&self) -> Result<Input, String> {
+        self.load_source(&self.source())
+    }
+
+    fn load_source(&self, source: &GitDiffSource) -> Result<Input, String> {
+        match source {
+            GitDiffSource::Changes => load_diff(
+                &self.directory,
+                &DiffRequest {
+                    target: None,
+                    staged: false,
+                    include_untracked: self.include_untracked,
+                    pathspecs: &self.pathspecs,
+                },
+            ),
+            GitDiffSource::Staged(target) => load_diff(
+                &self.directory,
+                &DiffRequest {
+                    target: target.as_deref(),
+                    staged: true,
+                    include_untracked: false,
+                    pathspecs: &self.pathspecs,
+                },
+            ),
+            GitDiffSource::Comparison(target) => load_diff(
+                &self.directory,
+                &DiffRequest {
+                    target: Some(target),
+                    staged: false,
+                    include_untracked: self.include_untracked,
+                    pathspecs: &self.pathspecs,
+                },
+            ),
+            GitDiffSource::Commit(target) => {
+                load_show(&self.directory, target.as_deref(), &self.pathspecs)
+            }
+            GitDiffSource::Stash(reference) => load_stash(&self.directory, reference.as_deref()),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum ReloadRequest {
+    Options {
+        options: Options,
+        directory: PathBuf,
+    },
+    Git(GitDiffSourceSwitcher),
 }
 
 #[derive(Clone)]
 pub(super) struct WatchRequest {
-    options: Options,
-    directory: PathBuf,
+    reload: ReloadRequest,
     paths: Vec<PathBuf>,
 }
 
@@ -46,11 +188,12 @@ impl WatchRequest {
     }
 
     pub(super) fn reload(&self) -> Result<Input, String> {
-        execute_options(
-            self.options.clone(),
-            &self.directory,
-            &mut Cursor::new(Vec::new()),
-        )
+        match &self.reload {
+            ReloadRequest::Options { options, directory } => {
+                execute_options(options.clone(), directory, &mut Cursor::new(Vec::new()))
+            }
+            ReloadRequest::Git(source_switcher) => source_switcher.reload(),
+        }
     }
 }
 
@@ -60,21 +203,30 @@ pub(super) fn load() -> Result<Launch, String> {
         .map_err(|error| format!("Could not read the current directory: {error}"))?;
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
+    let source_switcher = git_source_switcher(&options, &directory);
     let input = execute_options(options.clone(), &directory, &mut stdin)?;
     drop(stdin);
     let watch = if matches!(&options.command, Command::Diff(options) if options.watch) {
         Some(
-            WatchRequest::new(options, &directory)
+            WatchRequest::new(options, &directory, source_switcher.clone())
                 .map_err(|error| format!("Could not watch diff: {error}"))?,
         )
     } else {
         None
     };
-    Ok(Launch { input, watch })
+    Ok(Launch {
+        input,
+        watch,
+        source_switcher,
+    })
 }
 
 impl WatchRequest {
-    fn new(options: Options, directory: &Path) -> Result<Self, String> {
+    fn new(
+        options: Options,
+        directory: &Path,
+        source_switcher: Option<GitDiffSourceSwitcher>,
+    ) -> Result<Self, String> {
         let repository_directory = options.repo.as_deref().map_or_else(
             || directory.to_owned(),
             |path| resolve_repo_path(directory, path),
@@ -88,12 +240,60 @@ impl WatchRequest {
             Command::Show(_) | Command::StashShow(_) => watch_paths(&repository_directory)?,
             Command::Patch(_) => return Err("--watch cannot be used with patch".into()),
         };
-        Ok(Self {
-            options,
-            directory: directory.to_owned(),
-            paths,
-        })
+        let reload = source_switcher.map_or_else(
+            || ReloadRequest::Options {
+                options,
+                directory: directory.to_owned(),
+            },
+            ReloadRequest::Git,
+        );
+        Ok(Self { reload, paths })
     }
+}
+
+fn git_source_switcher(options: &Options, directory: &Path) -> Option<GitDiffSourceSwitcher> {
+    let repository_directory = options.repo.as_deref().map_or_else(
+        || directory.to_owned(),
+        |path| resolve_repo_path(directory, path),
+    );
+    let (source, include_untracked, pathspecs) = match &options.command {
+        Command::Diff(diff_options) => {
+            if direct_file_paths(diff_options, &repository_directory).is_some() {
+                return None;
+            }
+            let target = diff_options.targets.first().cloned();
+            let pathspecs = if diff_options.pathspecs.is_empty() && diff_options.targets.len() > 1 {
+                diff_options.targets[1..].to_vec()
+            } else {
+                diff_options.pathspecs.clone()
+            };
+            let source = if diff_options.staged {
+                GitDiffSource::Staged(target)
+            } else if let Some(target) = target {
+                GitDiffSource::Comparison(target)
+            } else {
+                GitDiffSource::Changes
+            };
+            (source, !diff_options.exclude_untracked, pathspecs)
+        }
+        Command::Show(options) => (
+            GitDiffSource::Commit(options.target.clone()),
+            true,
+            options.pathspecs.clone(),
+        ),
+        Command::StashShow(options) => (
+            GitDiffSource::Stash(options.reference.clone()),
+            true,
+            Vec::new(),
+        ),
+        Command::Patch(_) => return None,
+    };
+    Some(GitDiffSourceSwitcher {
+        directory: repository_directory,
+        source: Arc::new(Mutex::new(source)),
+        include_untracked,
+        pathspecs,
+    })
 }
 
 fn execute_options(

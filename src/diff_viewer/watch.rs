@@ -45,7 +45,7 @@ impl DiffViewer {
                 if viewer
                     .update(cx, |viewer, cx| {
                         if let Ok(input) = result {
-                            viewer.apply_watched_input(input, cx);
+                            viewer.apply_input(input, cx);
                         }
                     })
                     .is_err()
@@ -58,7 +58,7 @@ impl DiffViewer {
         Ok(())
     }
 
-    fn apply_watched_input(&mut self, input: Input, cx: &mut Context<Self>) {
+    pub(super) fn apply_input(&mut self, input: Input, cx: &mut Context<Self>) {
         if self.diff == input.diff
             && self.path_root == input.path_root
             && self.source_name == input.source_name
@@ -121,6 +121,8 @@ impl DiffViewer {
         self.header_text_selection = None;
         self.text_context_menu = None;
         self.path_context_menu = None;
+        self.source_catalog = None;
+        self.source_error = None;
         self.copy_path_feedback = None;
         let file_view_data = FileViewData::from_files(&self.diff.files, self.path_root.as_deref());
         self.file_meta = file_view_data.meta;
