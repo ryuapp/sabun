@@ -24,11 +24,14 @@ impl DiffViewer {
             ScrollbarTarget::Files => "files-scrollbar",
             ScrollbarTarget::DiffVertical => "diff-vertical-scrollbar",
             ScrollbarTarget::SourcePicker => "source-picker-scrollbar",
+            ScrollbarTarget::WorktreePicker => "worktree-picker-scrollbar",
         };
         let width = match target {
             ScrollbarTarget::Files => FILE_SCROLLBAR_WIDTH,
             ScrollbarTarget::DiffVertical => SCROLLBAR_WIDTH,
-            ScrollbarTarget::SourcePicker => SOURCE_PICKER_SCROLLBAR_WIDTH,
+            ScrollbarTarget::SourcePicker | ScrollbarTarget::WorktreePicker => {
+                SOURCE_PICKER_SCROLLBAR_WIDTH
+            }
         };
         let blocks_mouse = scrollbar_max_offset(axis, &scroll_handle) > px(0.);
 
@@ -152,9 +155,9 @@ impl DiffViewer {
 
         let scrollbar = match target {
             ScrollbarTarget::Files => scrollbar,
-            ScrollbarTarget::DiffVertical | ScrollbarTarget::SourcePicker => {
-                scrollbar.cursor(CursorStyle::Arrow)
-            }
+            ScrollbarTarget::DiffVertical
+            | ScrollbarTarget::SourcePicker
+            | ScrollbarTarget::WorktreePicker => scrollbar.cursor(CursorStyle::Arrow),
         };
 
         match axis {

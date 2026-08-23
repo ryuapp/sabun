@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use git2::{Diff, DiffFindOptions, DiffOptions, ErrorCode, Object, Oid, Repository, Sort, Tree};
 
-use super::{GitCommitPage, GitCommitSource, GitSourceCatalog, GitStashSource, Input};
+use super::{GitCommitPage, GitCommitSource, GitSourceCatalog, GitStashSource, GitWorktree, Input};
 use crate::diff::{DiffSet, from_git_diff};
 
 const DIFF_CONTEXT_LINES: u32 = 3;
@@ -197,6 +197,61 @@ fn discover(start: &Path) -> Result<Repository, String> {
     })
 }
 
+pub(super) fn worktree_root(start: &Path) -> Result<PathBuf, String> {
+    let repository = discover(start)?;
+    Ok(repository
+        .workdir()
+        .unwrap_or_else(|| repository.path())
+        .to_owned())
+}
+
+pub(super) fn load_worktrees(start: &Path) -> Result<Vec<GitWorktree>, String> {
+    let repository = discover(start)?;
+    let common_repository = Repository::open(repository.commondir()).map_err(|error| {
+        format!(
+            "Could not open the shared Git directory {}: {error}",
+            repository.commondir().display()
+        )
+    })?;
+    let mut paths = Vec::new();
+    if let Some(path) = common_repository.workdir() {
+        paths.push(path.to_owned());
+    }
+
+    let names = common_repository
+        .worktrees()
+        .map_err(|error| format!("Could not enumerate Git worktrees: {error}"))?;
+    for name in &names {
+        let name = name.map_err(|error| format!("Could not decode a worktree name: {error}"))?;
+        let Some(name) = name else {
+            continue;
+        };
+        let worktree = common_repository
+            .find_worktree(name)
+            .map_err(|error| format!("Could not read worktree {name}: {error}"))?;
+        let path = worktree.path().to_owned();
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+
+    paths
+        .into_iter()
+        .map(|path| {
+            let worktree_repository = discover(&path)?;
+            Ok(GitWorktree {
+                name: path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("worktree")
+                    .to_owned(),
+                branch: branch_label(&worktree_repository),
+                path,
+            })
+        })
+        .collect()
+}
+
 pub(super) fn watch_paths(start: &Path) -> Result<Vec<PathBuf>, String> {
     let repository = discover(start)?;
     let worktree = repository
@@ -207,6 +262,10 @@ pub(super) fn watch_paths(start: &Path) -> Result<Vec<PathBuf>, String> {
     let mut paths = vec![worktree.clone()];
     if !git_dir.starts_with(&worktree) {
         paths.push(git_dir);
+    }
+    let common_dir = repository.commondir().to_owned();
+    if !common_dir.starts_with(&worktree) && !paths.contains(&common_dir) {
+        paths.push(common_dir);
     }
     Ok(paths)
 }

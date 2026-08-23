@@ -17,7 +17,7 @@ pub(super) use arguments::Options;
 use arguments::{Command, DiffOptions, PatchOptions, ShowOptions, StashShowOptions};
 use repository::{
     DiffRequest, load_commit_page, load_diff, load_show, load_source_catalog, load_stash,
-    watch_paths,
+    load_worktrees, watch_paths, worktree_root,
 };
 
 #[derive(Clone)]
@@ -92,15 +92,42 @@ pub(crate) struct GitSourceCatalog {
     pub(crate) stashes: Vec<GitStashSource>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GitWorktree {
+    pub(crate) name: String,
+    pub(crate) branch: String,
+    pub(crate) path: PathBuf,
+}
+
 #[derive(Clone)]
 pub(crate) struct GitDiffSourceSwitcher {
-    directory: PathBuf,
+    directory: Arc<Mutex<PathBuf>>,
     source: Arc<Mutex<GitDiffSource>>,
+    worktrees: Arc<Vec<GitWorktree>>,
     include_untracked: bool,
     pathspecs: Vec<String>,
 }
 
 impl GitDiffSourceSwitcher {
+    fn directory(&self) -> PathBuf {
+        self.directory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn worktrees(&self) -> &[GitWorktree] {
+        &self.worktrees
+    }
+
+    pub(crate) fn current_worktree(&self) -> Option<GitWorktree> {
+        let directory = self.directory();
+        self.worktrees
+            .iter()
+            .find(|worktree| worktree.path == directory)
+            .cloned()
+    }
+
     pub(crate) fn source(&self) -> GitDiffSource {
         self.source
             .lock()
@@ -109,7 +136,24 @@ impl GitDiffSourceSwitcher {
     }
 
     pub(crate) fn switch_to(&self, source: GitDiffSource) -> Result<Input, String> {
-        let input = self.load_source(&source)?;
+        let input = self.load_source(&self.directory(), &source)?;
+        *self
+            .source
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = source;
+        Ok(input)
+    }
+
+    pub(crate) fn switch_worktree(&self, path: PathBuf) -> Result<Input, String> {
+        if !self.worktrees.iter().any(|worktree| worktree.path == path) {
+            return Err(format!("Unknown Git worktree: {}", path.display()));
+        }
+        let source = GitDiffSource::Changes;
+        let input = self.load_source(&path, &source)?;
+        *self
+            .directory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = path;
         *self
             .source
             .lock()
@@ -118,21 +162,21 @@ impl GitDiffSourceSwitcher {
     }
 
     pub(crate) fn catalog(&self) -> Result<GitSourceCatalog, String> {
-        load_source_catalog(&self.directory)
+        load_source_catalog(&self.directory())
     }
 
     pub(crate) fn commit_page(&self, offset: usize) -> Result<GitCommitPage, String> {
-        load_commit_page(&self.directory, offset)
+        load_commit_page(&self.directory(), offset)
     }
 
     fn reload(&self) -> Result<Input, String> {
-        self.load_source(&self.source())
+        self.load_source(&self.directory(), &self.source())
     }
 
-    fn load_source(&self, source: &GitDiffSource) -> Result<Input, String> {
+    fn load_source(&self, directory: &Path, source: &GitDiffSource) -> Result<Input, String> {
         match source {
             GitDiffSource::Changes => load_diff(
-                &self.directory,
+                directory,
                 &DiffRequest {
                     target: None,
                     staged: false,
@@ -141,7 +185,7 @@ impl GitDiffSourceSwitcher {
                 },
             ),
             GitDiffSource::Staged(target) => load_diff(
-                &self.directory,
+                directory,
                 &DiffRequest {
                     target: target.as_deref(),
                     staged: true,
@@ -150,7 +194,7 @@ impl GitDiffSourceSwitcher {
                 },
             ),
             GitDiffSource::Comparison(target) => load_diff(
-                &self.directory,
+                directory,
                 &DiffRequest {
                     target: Some(target),
                     staged: false,
@@ -159,9 +203,9 @@ impl GitDiffSourceSwitcher {
                 },
             ),
             GitDiffSource::Commit(target) => {
-                load_show(&self.directory, target.as_deref(), &self.pathspecs)
+                load_show(directory, target.as_deref(), &self.pathspecs)
             }
-            GitDiffSource::Stash(reference) => load_stash(&self.directory, reference.as_deref()),
+            GitDiffSource::Stash(reference) => load_stash(directory, reference.as_deref()),
         }
     }
 }
@@ -205,7 +249,7 @@ pub(super) fn load(options: Options) -> Result<Launch, String> {
         .map_err(|error| format!("Could not read the current directory: {error}"))?;
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
-    let source_switcher = git_source_switcher(&options, &directory);
+    let source_switcher = git_source_switcher(&options, &directory)?;
     let input = execute_options(options.clone(), &directory, &mut stdin)?;
     drop(stdin);
     let watch = if matches!(&options.command, Command::Diff(options) if options.watch) {
@@ -242,6 +286,21 @@ impl WatchRequest {
             Command::Show(_) | Command::StashShow(_) => watch_paths(&repository_directory)?,
             Command::Patch(_) => return Err("--watch cannot be used with patch".into()),
         };
+        let paths = if let Some(source_switcher) = &source_switcher {
+            let mut paths = source_switcher
+                .worktrees()
+                .iter()
+                .map(|worktree| watch_paths(&worktree.path))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            paths.sort();
+            paths.dedup();
+            paths
+        } else {
+            paths
+        };
         let reload = source_switcher.map_or_else(
             || ReloadRequest::Options {
                 options,
@@ -253,7 +312,10 @@ impl WatchRequest {
     }
 }
 
-fn git_source_switcher(options: &Options, directory: &Path) -> Option<GitDiffSourceSwitcher> {
+fn git_source_switcher(
+    options: &Options,
+    directory: &Path,
+) -> Result<Option<GitDiffSourceSwitcher>, String> {
     let repository_directory = options.repo.as_deref().map_or_else(
         || directory.to_owned(),
         |path| resolve_repo_path(directory, path),
@@ -261,7 +323,7 @@ fn git_source_switcher(options: &Options, directory: &Path) -> Option<GitDiffSou
     let (source, include_untracked, pathspecs) = match &options.command {
         Command::Diff(diff_options) => {
             if direct_file_paths(diff_options, &repository_directory).is_some() {
-                return None;
+                return Ok(None);
             }
             let target = diff_options.targets.first().cloned();
             let pathspecs = if diff_options.pathspecs.is_empty() && diff_options.targets.len() > 1 {
@@ -288,14 +350,17 @@ fn git_source_switcher(options: &Options, directory: &Path) -> Option<GitDiffSou
             true,
             Vec::new(),
         ),
-        Command::Patch(_) => return None,
+        Command::Patch(_) => return Ok(None),
     };
-    Some(GitDiffSourceSwitcher {
-        directory: repository_directory,
+    let directory = worktree_root(&repository_directory)?;
+    let worktrees = load_worktrees(&directory)?;
+    Ok(Some(GitDiffSourceSwitcher {
+        directory: Arc::new(Mutex::new(directory)),
         source: Arc::new(Mutex::new(source)),
+        worktrees: Arc::new(worktrees),
         include_untracked,
         pathspecs,
-    })
+    }))
 }
 
 fn execute_options(
