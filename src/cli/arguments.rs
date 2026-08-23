@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct Options {
+pub(crate) struct Options {
     pub(super) repo: Option<PathBuf>,
     pub(super) command: Command,
 }

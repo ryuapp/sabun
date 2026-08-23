@@ -1,12 +1,15 @@
 use super::super::{
-    App, FontWeight, IntoElement, Palette, ParentElement, RenderOnce, SharedString, Styled, Window,
-    div, px,
+    App, FontWeight, IntoElement, Palette, ParentElement, RenderOnce, Rgba, SharedString, Styled,
+    Window, div, px,
 };
 
 #[derive(IntoElement)]
 pub(in crate::diff_viewer) struct EmptyState {
     title: SharedString,
     detail: SharedString,
+    icon: SharedString,
+    icon_color: Rgba,
+    icon_background: Rgba,
     palette: Palette,
 }
 
@@ -19,8 +22,23 @@ impl EmptyState {
         Self {
             title: title.into(),
             detail: detail.into(),
+            icon: "✓".into(),
+            icon_color: palette.green,
+            icon_background: palette.green_bg,
             palette,
         }
+    }
+
+    pub(in crate::diff_viewer) fn icon(
+        mut self,
+        icon: impl Into<SharedString>,
+        color: Rgba,
+        background: Rgba,
+    ) -> Self {
+        self.icon = icon.into();
+        self.icon_color = color;
+        self.icon_background = background;
+        self
     }
 }
 
@@ -43,13 +61,13 @@ impl RenderOnce for EmptyState {
                         div()
                             .size(px(48.))
                             .rounded_full()
-                            .bg(self.palette.green_bg)
-                            .text_color(self.palette.green)
+                            .bg(self.icon_background)
+                            .text_color(self.icon_color)
                             .flex()
                             .items_center()
                             .justify_center()
                             .text_xl()
-                            .child("✓"),
+                            .child(self.icon),
                     )
                     .child(
                         div()

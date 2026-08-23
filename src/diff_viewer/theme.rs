@@ -45,8 +45,8 @@ impl Palette {
         }
     }
 
-    pub(super) fn for_mode(mode: ThemeMode) -> Self {
-        let mut palette = match mode {
+    pub(super) fn base_for_mode(mode: ThemeMode) -> Self {
+        match mode {
             ThemeMode::Dark => Self {
                 canvas: rgb(0x181818),
                 sidebar: rgb(0x181818),
@@ -89,7 +89,11 @@ impl Palette {
                 blue: rgb(0x2878c7),
                 selection: rgb(0xe7e7e7),
             },
-        };
+        }
+    }
+
+    pub(super) fn for_mode(mode: ThemeMode) -> Self {
+        let mut palette = Self::base_for_mode(mode);
         let diff = super::syntax::syntax_diff_colors(mode);
         let addition_changed = diff.addition.is_some() || diff.addition_background.is_some();
         let deletion_changed = diff.deletion.is_some() || diff.deletion_background.is_some();

@@ -6,7 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::cli::{GitDiffSourceSwitcher, GitSourceCatalog, Input, Launch, WatchRequest};
+use crate::cli::{
+    self, GitDiffSourceSwitcher, GitSourceCatalog, Input, Launch, Options, WatchRequest,
+};
 use crate::diff::{DiffFile, DiffHunk, DiffLine, DiffSet, LineKind};
 use crate::icons::{ExpandIconDirection, ThemeIcon, context_expand_icon, theme_icon};
 use gpui::prelude::FluentBuilder;
@@ -169,6 +171,12 @@ enum SourceCatalogLoadState {
     Idle,
     Initial,
     MoreHistory,
+}
+
+enum StartupState {
+    Loading,
+    Ready,
+    Failed(String),
 }
 
 impl ScrollbarTarget {
@@ -506,6 +514,7 @@ impl FileChangeKind {
 }
 
 struct DiffViewer {
+    startup_state: StartupState,
     diff: DiffSet,
     path_root: Option<PathBuf>,
     source_name: String,
@@ -575,13 +584,16 @@ struct DiffViewer {
 }
 
 impl DiffViewer {
-    fn new(
-        input: Input,
-        watch: Option<WatchRequest>,
-        source_switcher: Option<GitDiffSourceSwitcher>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    fn new(options: Options, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let input = Input {
+            diff: DiffSet::default(),
+            path_root: None,
+            source_name: "Sabun".into(),
+            comparison_label: String::new(),
+            target_label: String::new(),
+            empty_title: "Loading changes".into(),
+            empty_detail: "Reading the selected diff source…".into(),
+        };
         let Input {
             diff,
             path_root,
@@ -625,6 +637,7 @@ impl DiffViewer {
                 }
             });
         let viewer = Self {
+            startup_state: StartupState::Loading,
             diff,
             path_root,
             source_name,
@@ -639,7 +652,7 @@ impl DiffViewer {
             header_text_selection: None,
             text_context_menu: None,
             path_context_menu: None,
-            source_switcher,
+            source_switcher: None,
             source_picker_open: false,
             source_picker_section: SourcePickerSection::default(),
             source_picker_scroll: ScrollHandle::new(),
@@ -692,12 +705,45 @@ impl DiffViewer {
             total_deletions,
             _window_activation_subscription: window_activation_subscription,
         };
-        if let Some(watch) = watch
-            && let Err(error) = viewer.start_watch(watch, cx)
-        {
-            eprintln!("Could not watch diff: {error}");
-        }
+        viewer.start_initial_load(options, cx);
         viewer
+    }
+
+    fn start_initial_load(&self, options: Options, cx: &mut Context<Self>) {
+        cx.spawn(async move |viewer, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { cli::load(options) })
+                .await;
+            let _ = viewer.update(cx, |viewer, cx| {
+                viewer.finish_initial_load(result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_initial_load(&mut self, result: Result<Launch, String>, cx: &mut Context<Self>) {
+        match result {
+            Ok(Launch {
+                input,
+                watch,
+                source_switcher,
+            }) => {
+                self.source_switcher = source_switcher;
+                self.startup_state = StartupState::Ready;
+                self.apply_input(input, cx);
+                if let Some(watch) = watch
+                    && let Err(error) = self.start_watch(watch, cx)
+                {
+                    eprintln!("Could not watch diff: {error}");
+                }
+            }
+            Err(error) => {
+                eprintln!("Could not load diff: {error}");
+                self.startup_state = StartupState::Failed(error);
+                cx.notify();
+            }
+        }
     }
 
     fn palette(&self) -> Palette {
@@ -763,9 +809,16 @@ impl DiffViewer {
 
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = self.palette();
-        self.update_diff_row_offsets(window, palette);
-        self.sync_selected_file_from_scroll();
+        let ready = matches!(self.startup_state, StartupState::Ready);
+        let palette = if ready {
+            self.palette()
+        } else {
+            Palette::base_for_mode(self.theme)
+        };
+        if ready {
+            self.update_diff_row_offsets(window, palette);
+            self.sync_selected_file_from_scroll();
+        }
         let middle_scroll_cursor = if cfg!(target_os = "windows") {
             None
         } else {
@@ -773,10 +826,21 @@ impl Render for DiffViewer {
                 .map(|state| vertical_auto_scroll_cursor(state.cursor.y - state.anchor.y))
         };
 
-        let content = if self.diff.files.is_empty() {
-            self.render_empty(palette)
-        } else {
-            self.render_diff_body(palette, cx)
+        let content = match &self.startup_state {
+            StartupState::Loading => EmptyState::new(
+                "Loading changes",
+                "Reading the selected diff source…",
+                palette,
+            )
+            .icon("…", palette.blue, palette.hover)
+            .into_any_element(),
+            StartupState::Failed(error) => {
+                EmptyState::new("Could not load changes", error.clone(), palette)
+                    .icon("!", palette.red, palette.red_bg)
+                    .into_any_element()
+            }
+            StartupState::Ready if self.diff.files.is_empty() => self.render_empty(palette),
+            StartupState::Ready => self.render_diff_body(palette, cx),
         };
         let text_context_menu = self.text_context_menu.map(|position| {
             self.render_text_context_menu(position, window.viewport_size(), palette, cx)
@@ -853,12 +917,7 @@ impl Render for DiffViewer {
     }
 }
 
-pub(super) fn run(launch: Launch) {
-    let Launch {
-        input,
-        watch,
-        source_switcher,
-    } = launch;
+pub(super) fn run(options: Options) {
     Application::new().run(move |cx: &mut App| {
         crate::application_icon::install();
         cx.bind_keys([
@@ -888,17 +947,7 @@ pub(super) fn run(launch: Launch) {
                 focus: true,
                 ..Default::default()
             },
-            move |window, cx| {
-                cx.new(|cx| {
-                    DiffViewer::new(
-                        input.clone(),
-                        watch.clone(),
-                        source_switcher.clone(),
-                        window,
-                        cx,
-                    )
-                })
-            },
+            move |window, cx| cx.new(move |cx| DiffViewer::new(options, window, cx)),
         )
         .unwrap();
         cx.activate(true);
