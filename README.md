@@ -7,6 +7,8 @@
 Sabun is a blazing-fast diff viewer built with [GPUI](https://gpui.rs).
 It's basically [Hunk](https://www.hunk.dev), but as a GUI without the TUI and agent stuff.
 
+<img width="1435" height="898" alt="sabun demo" src="https://github.com/user-attachments/assets/4b89bc9d-6bbc-4af8-a104-ab8d0afb7ca9" />
+
 ## Install
 
 [mise](https://mise.jdx.dev) (recommended):
