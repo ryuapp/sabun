@@ -54,6 +54,7 @@ mod top_bar;
 mod tree_layout;
 mod unified_view;
 mod watch;
+mod worktree_picker;
 mod zoom;
 
 use code_text::{
@@ -163,6 +164,7 @@ enum ScrollbarTarget {
     Files,
     DiffVertical,
     SourcePicker,
+    WorktreePicker,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -179,12 +181,19 @@ enum StartupState {
     Failed(String),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum WorktreePickerState {
+    #[default]
+    Closed,
+    Open,
+}
+
 impl ScrollbarTarget {
     const fn smooth_target(self) -> Option<SmoothScrollTarget> {
         match self {
             Self::Files => Some(SmoothScrollTarget::Files),
             Self::DiffVertical => Some(SmoothScrollTarget::Diff),
-            Self::SourcePicker => None,
+            Self::SourcePicker | Self::WorktreePicker => None,
         }
     }
 }
@@ -530,6 +539,11 @@ struct DiffViewer {
     text_context_menu: Option<Point<Pixels>>,
     path_context_menu: Option<PathContextMenu>,
     source_switcher: Option<GitDiffSourceSwitcher>,
+    worktree_picker_state: WorktreePickerState,
+    worktree_picker_scroll: ScrollHandle,
+    worktree_switching: Option<PathBuf>,
+    worktree_switch_generation: u64,
+    worktree_error: Option<String>,
     source_picker_open: bool,
     source_picker_section: SourcePickerSection,
     source_picker_scroll: ScrollHandle,
@@ -653,6 +667,11 @@ impl DiffViewer {
             text_context_menu: None,
             path_context_menu: None,
             source_switcher: None,
+            worktree_picker_state: WorktreePickerState::Closed,
+            worktree_picker_scroll: ScrollHandle::new(),
+            worktree_switching: None,
+            worktree_switch_generation: 0,
+            worktree_error: None,
             source_picker_open: false,
             source_picker_section: SourcePickerSection::default(),
             source_picker_scroll: ScrollHandle::new(),
@@ -852,6 +871,10 @@ impl Render for DiffViewer {
         let source_picker = self
             .source_picker_open
             .then(|| self.render_source_picker(palette, cx));
+        let worktree_picker = self
+            .worktree_picker_state
+            .eq(&WorktreePickerState::Open)
+            .then(|| self.render_worktree_picker(palette, cx));
 
         div()
             .key_context("DiffViewer")
@@ -914,6 +937,7 @@ impl Render for DiffViewer {
             .children(text_context_menu)
             .children(path_context_menu)
             .children(source_picker)
+            .children(worktree_picker)
     }
 }
 

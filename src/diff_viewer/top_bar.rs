@@ -40,6 +40,36 @@ fn viewed_progress_gauge(progress: f32, palette: Palette) -> impl IntoElement {
 }
 
 impl DiffViewer {
+    fn render_worktree_selector(
+        &self,
+        palette: Palette,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let Some(worktree) = self
+            .source_switcher
+            .as_ref()
+            .and_then(crate::cli::GitDiffSourceSwitcher::current_worktree)
+        else {
+            return div().into_any_element();
+        };
+        div()
+            .id("worktree-selector")
+            .h(px(32.))
+            .max_w(px(180.))
+            .px_3()
+            .rounded_md()
+            .border_1()
+            .border_color(palette.border)
+            .bg(palette.elevated)
+            .flex()
+            .items_center()
+            .text_color(palette.text)
+            .hover(|button| button.bg(palette.hover))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_worktree_picker(cx)))
+            .child(div().min_w_0().truncate().child(worktree.branch))
+            .into_any_element()
+    }
+
     fn render_source_selector(&self, palette: Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
         let Some(source_switcher) = &self.source_switcher else {
             return div().into_any_element();
@@ -102,8 +132,15 @@ impl DiffViewer {
                             .child(self.source_name.clone()),
                     )
                     .when(self.source_switcher.is_some(), |header| {
+                        let show_worktrees = self
+                            .source_switcher
+                            .as_ref()
+                            .is_some_and(|switcher| switcher.worktrees().len() > 1);
                         header
                             .child(div().h(px(24.)).w(px(1.)).bg(palette.border))
+                            .when(show_worktrees, |header| {
+                                header.child(self.render_worktree_selector(palette, cx))
+                            })
                             .child(self.render_source_selector(palette, cx))
                     })
                     .child(div().text_color(palette.faint).child("/"))

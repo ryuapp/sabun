@@ -2,10 +2,10 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
-use git2::{IndexAddOption, Repository, Signature};
+use git2::{IndexAddOption, Repository, Signature, WorktreeAddOptions};
 
 use super::{
     GitDiffSource, WatchRequest, execute, execute_options, git_source_switcher, repository,
@@ -14,6 +14,8 @@ use crate::cli::arguments::{
     Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, parse_from,
 };
 use crate::cli::repository::DiffRequest;
+
+static NEXT_FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
 
 fn parse_command(args: &[&str]) -> Command {
     parse_from(args).unwrap().command
@@ -343,7 +345,9 @@ fn git_source_switcher_loads_changes_staged_commit_and_stash() {
             pathspecs: Vec::new(),
         }),
     };
-    let switcher = git_source_switcher(&options, &fixture.root).unwrap();
+    let switcher = git_source_switcher(&options, &fixture.root)
+        .unwrap()
+        .unwrap();
     assert_eq!(switcher.source(), GitDiffSource::Changes);
     let catalog = switcher.catalog().unwrap();
     assert_eq!(catalog.commits.len(), 1);
@@ -384,6 +388,47 @@ fn git_source_switcher_loads_changes_staged_commit_and_stash() {
             .files,
         &["tracked.txt"],
     );
+}
+
+#[test]
+fn git_source_switcher_discovers_and_switches_linked_worktrees() {
+    let fixture = Fixture::new();
+    let linked = fixture.add_worktree("linked");
+    fs::write(linked.join("tracked.txt"), "linked worktree change\n").unwrap();
+
+    let options = Options {
+        repo: None,
+        command: Command::Diff(DiffOptions {
+            watch: false,
+            staged: false,
+            exclude_untracked: false,
+            targets: Vec::new(),
+            pathspecs: Vec::new(),
+        }),
+    };
+    let switcher = git_source_switcher(&options, &fixture.root)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(switcher.worktrees().len(), 2);
+    assert!(
+        switcher
+            .worktrees()
+            .iter()
+            .any(|worktree| worktree.path == fixture.root)
+    );
+    let linked_worktree = switcher
+        .worktrees()
+        .iter()
+        .find(|worktree| worktree.path == linked)
+        .unwrap();
+    assert_eq!(linked_worktree.branch, "linked");
+
+    let input = switcher.switch_worktree(linked.clone()).unwrap();
+    assert_eq!(switcher.source(), GitDiffSource::Changes);
+    assert_eq!(switcher.current_worktree().unwrap().path, linked.as_path());
+    assert_eq!(input.path_root.as_deref(), Some(linked.as_path()));
+    assert_paths(&input.diff.files, &["tracked.txt"]);
 }
 
 #[test]
@@ -635,32 +680,50 @@ fn assert_paths(files: &[crate::diff::DiffFile], expected: &[&str]) {
 
 struct Fixture {
     root: PathBuf,
+    cleanup_root: PathBuf,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("sabun-git-test-{nonce}"));
+        let fixture_id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
+        let cleanup_root = std::env::temp_dir().join(format!(
+            "sabun-git-test-{}-{fixture_id}",
+            std::process::id()
+        ));
+        let root = cleanup_root.join("main");
         fs::create_dir_all(&root).unwrap();
         let repository = Repository::init(&root).unwrap();
         let root = repository.workdir().unwrap().to_owned();
         fs::write(root.join("tracked.txt"), "initial\n").unwrap();
         commit_all(&repository, "initial");
-        Self { root }
+        Self { root, cleanup_root }
     }
 
     fn commit_all(&self, message: &str) {
         let repository = Repository::open(&self.root).unwrap();
         commit_all(&repository, message);
     }
+
+    fn add_worktree(&self, name: &str) -> PathBuf {
+        let path = self.cleanup_root.join(name);
+        let repository = Repository::open(&self.root).unwrap();
+        let head = repository.head().unwrap().peel_to_commit().unwrap();
+        let branch = repository.branch(name, &head, false).unwrap();
+        let reference = branch.into_reference();
+        let mut options = WorktreeAddOptions::new();
+        options.reference(Some(&reference));
+        repository.worktree(name, &path, Some(&options)).unwrap();
+        Repository::open(&path)
+            .unwrap()
+            .workdir()
+            .unwrap()
+            .to_owned()
+    }
 }
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        let _ = fs::remove_dir_all(&self.cleanup_root);
     }
 }
 
