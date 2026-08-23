@@ -11,12 +11,12 @@ use super::{
     GitDiffSource, WatchRequest, execute, execute_options, git_source_switcher, repository,
 };
 use crate::cli::arguments::{
-    Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, options,
+    Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, parse_from,
 };
 use crate::cli::repository::DiffRequest;
 
 fn parse_command(args: &[&str]) -> Command {
-    options().run_inner(args).unwrap().command
+    parse_from(args).unwrap().command
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn cli_parses_diff_options_targets_and_strict_pathspecs() {
             pathspecs: vec!["src".into(), "README.md".into()],
         })
     );
-    assert!(options().run_inner(&["diff", "--cached"]).is_err());
+    assert!(parse_from(&["diff", "--cached"]).is_err());
     assert_eq!(
         parse_command(&["diff", "--", "src"]),
         Command::Diff(DiffOptions {
@@ -102,7 +102,7 @@ fn cli_parses_watch_and_rejects_removed_demo_mode() {
             pathspecs: Vec::new(),
         })
     );
-    assert!(options().run_inner(&["--demo"]).is_err());
+    assert!(parse_from(&["--demo"]).is_err());
 }
 
 #[test]
@@ -118,15 +118,11 @@ fn cli_parses_global_repo_selector() {
         }),
     };
     assert_eq!(
-        options()
-            .run_inner(&["--repo", "../nitro", "diff"])
-            .unwrap(),
+        parse_from(&["--repo", "../nitro", "diff"]).unwrap(),
         expected
     );
     assert_eq!(
-        options()
-            .run_inner(&["diff", "--repo", "../nitro"])
-            .unwrap(),
+        parse_from(&["diff", "--repo", "../nitro"]).unwrap(),
         expected
     );
 }
