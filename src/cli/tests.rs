@@ -2,7 +2,7 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use git2::{IndexAddOption, Repository, Signature};
@@ -14,6 +14,8 @@ use crate::cli::arguments::{
     Command, DiffOptions, Options, PatchOptions, ShowOptions, StashShowOptions, parse_from,
 };
 use crate::cli::repository::DiffRequest;
+
+static NEXT_FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
 
 fn parse_command(args: &[&str]) -> Command {
     parse_from(args).unwrap().command
@@ -683,11 +685,11 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let cleanup_root = std::env::temp_dir().join(format!("sabun-git-test-{nonce}"));
+        let fixture_id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
+        let cleanup_root = std::env::temp_dir().join(format!(
+            "sabun-git-test-{}-{fixture_id}",
+            std::process::id()
+        ));
         let root = cleanup_root.join("main");
         fs::create_dir_all(&root).unwrap();
         let repository = Repository::init(&root).unwrap();
