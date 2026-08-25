@@ -120,7 +120,6 @@ impl DiffViewer {
                 self.render_split_row(
                     display_index,
                     file_index,
-                    hunk_index,
                     old.as_ref(),
                     old_content,
                     new.as_ref(),
@@ -149,7 +148,6 @@ impl DiffViewer {
                 self.render_unified_row(
                     display_index,
                     file_index,
-                    hunk_index,
                     &line,
                     line_content,
                     counterpart,

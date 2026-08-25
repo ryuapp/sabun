@@ -1,0 +1,12 @@
+[package]
+name = "sabun-themes"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unreadable_literal = "allow"
+large_types_passed_by_value = "allow"

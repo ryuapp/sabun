@@ -13,7 +13,6 @@ impl DiffViewer {
         &mut self,
         display_index: usize,
         file_index: usize,
-        hunk_index: usize,
         old: Option<&DiffLine>,
         old_content: Option<&str>,
         new: Option<&DiffLine>,
@@ -42,7 +41,6 @@ impl DiffViewer {
             .child(self.render_split_cell(
                 display_index,
                 file_index,
-                hunk_index,
                 Side::Old,
                 old,
                 old_content,
@@ -53,7 +51,6 @@ impl DiffViewer {
             .child(self.render_split_cell(
                 display_index,
                 file_index,
-                hunk_index,
                 Side::New,
                 new,
                 new_content,
@@ -69,7 +66,6 @@ impl DiffViewer {
         &mut self,
         display_index: usize,
         file_index: usize,
-        hunk_index: usize,
         side: Side,
         line: Option<&DiffLine>,
         content: Option<&str>,
@@ -106,7 +102,6 @@ impl DiffViewer {
             palette,
             number.map(|line_number| SyntaxPosition {
                 file_index,
-                hunk_index,
                 line_number,
             }),
         );

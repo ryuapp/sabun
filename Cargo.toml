@@ -1,3 +1,7 @@
+[workspace]
+members = ["themes"]
+resolver = "2"
+
 [package]
 name = "sabun"
 version = "0.0.1"
@@ -9,8 +13,8 @@ gpui = "=0.2.2"
 git2 = { version = "=0.21.0", features = ["vendored-libgit2"] }
 notify = "=8.2.0"
 similar = { version = "=3.1.2", features = ["inline", "unicode"] }
-syntect = "=5.3.0"
-two-face = { version = "=0.5.2", default-features = false, features = ["syntect-onig"] }
+syntaxmate = { version = "=0.1.1", default-features = false, features = ["bundled-grammars"] }
+themes = { package = "sabun-themes", path = "themes" }
 unicode-width = "=0.2.2"
 usage = { package = "usage-rs", version = "=6.1.0" }
 

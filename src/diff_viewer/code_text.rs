@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use super::{
-    Arc, DiffDisplayRow, DiffViewer, HighlightLines, HighlightStyle, IntoElement, LineKind,
-    Palette, Pixels, Rgba, SharedString, Side, Styled, StyledText, TextRun, ThemeMode, canvas,
-    combine_highlights, fill, font, inline_ranges, point, px, size, syntax_highlighter,
-    syntax_highlights, syntax_highlights_with_state, unpack_diff_row_index,
+    Arc, DiffViewer, HighlightStyle, IntoElement, LineKind, Palette, Pixels, Rgba, SharedString,
+    Side, Styled, StyledText, SyntaxHighlighter, TextRun, ThemeMode, canvas, combine_highlights,
+    fill, font, inline_ranges, point, px, size, syntax_highlighter, syntax_highlights,
+    syntax_highlights_with_state,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -23,7 +23,6 @@ pub(super) struct InlineCacheKey {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) struct SyntaxPosition {
     pub(super) file_index: usize,
-    pub(super) hunk_index: usize,
     pub(super) line_number: u32,
 }
 
@@ -31,25 +30,31 @@ pub(super) struct SyntaxPosition {
 pub(super) struct SyntaxStreamKey {
     theme: ThemeMode,
     file_index: usize,
-    hunk_index: usize,
     side: Side,
     language: &'static str,
 }
 
 pub(super) struct SyntaxStreamState {
-    highlighter: HighlightLines<'static>,
-    embedded_highlighter: Option<(&'static str, HighlightLines<'static>)>,
-    line_buffer: String,
+    highlighter: SyntaxHighlighter,
+    embedded_highlighter: Option<(&'static str, SyntaxHighlighter)>,
     next_line_number: Option<u32>,
+    source: Option<Arc<String>>,
+    last_used: u64,
 }
 
 impl SyntaxStreamState {
-    fn new(language: &'static str, theme: ThemeMode) -> Self {
+    fn new(
+        language: &'static str,
+        theme: ThemeMode,
+        source: Option<Arc<String>>,
+        last_used: u64,
+    ) -> Self {
         Self {
             highlighter: syntax_highlighter(language, theme),
             embedded_highlighter: None,
-            line_buffer: String::new(),
             next_line_number: None,
+            source,
+            last_used,
         }
     }
 
@@ -61,13 +66,16 @@ impl SyntaxStreamState {
         theme: ThemeMode,
         palette: Palette,
     ) -> Vec<(Range<usize>, HighlightStyle)> {
+        if let Some(source) = self.source.as_deref() {
+            return self.highlighter.highlight_source_line(source, line_number);
+        }
         if self.next_line_number != Some(line_number) {
-            *self = Self::new(language, theme);
+            let last_used = self.last_used;
+            *self = Self::new(language, theme, None, last_used);
         }
         let highlights = syntax_highlights_with_state(
             &mut self.highlighter,
             &mut self.embedded_highlighter,
-            &mut self.line_buffer,
             content,
             language,
             palette,
@@ -87,7 +95,11 @@ pub(super) struct CachedCodeLine {
 
 type InlineHighlightRanges = Arc<[Range<usize>]>;
 pub(super) type InlineHighlightPair = (InlineHighlightRanges, InlineHighlightRanges);
-const MAX_SYNTAX_STREAMS: usize = 1_024;
+// A tokenizer retains parser states, checkpoints, and caches as the user scrolls. Keep only the
+// nearby files alive; otherwise a large repository makes memory usage grow with every file seen.
+const MAX_SYNTAX_STREAMS: usize = 16;
+const MAX_SYNTAX_CACHE_ENTRIES: usize = 8_192;
+const MAX_INLINE_CACHE_ENTRIES: usize = 8_192;
 
 #[derive(Clone)]
 pub(super) struct CachedInlineHighlightPair {
@@ -97,62 +109,12 @@ pub(super) struct CachedInlineHighlightPair {
 }
 
 impl DiffViewer {
-    pub(super) fn retain_valid_syntax_cache(&mut self) {
+    pub(super) fn invalidate_syntax_cache(&mut self) {
+        // A preceding edit can change the parser state of an otherwise unchanged visible line.
+        // Content-only validation is therefore insufficient once highlighting uses full-file
+        // context; invalidate the bounded caches when a refreshed diff is accepted.
+        self.syntax_cache.clear();
         self.syntax_streams.clear();
-        let rows = &self.diff_rows;
-        let file_meta = &self.file_meta;
-        self.syntax_cache.retain(|key, cached| {
-            let (content, file_index, expected_side) = match rows.get(key.display_index) {
-                Some(DiffDisplayRow::Split {
-                    file_index,
-                    hunk_index,
-                    old_line_index,
-                    new_line_index,
-                    ..
-                }) => {
-                    let line_index = match key.side {
-                        Side::Old => old_line_index,
-                        Side::New => new_line_index,
-                    };
-                    unpack_diff_row_index(line_index).and_then(|line_index| {
-                        let hunk = self
-                            .diff
-                            .files
-                            .get(file_index as usize)?
-                            .hunks
-                            .get(hunk_index as usize)?;
-                        hunk.lines
-                            .get(line_index)
-                            .map(|line| (hunk.line_content(line), file_index as usize, key.side))
-                    })
-                }
-                Some(DiffDisplayRow::Unified {
-                    file_index,
-                    hunk_index,
-                    row_index,
-                    ..
-                }) => self.diff.files.get(file_index as usize).and_then(|file| {
-                    let hunk = file.hunks.get(hunk_index as usize)?;
-                    hunk.lines.get(row_index as usize).map(|line| {
-                        (
-                            hunk.line_content(line),
-                            file_index as usize,
-                            if line.kind == LineKind::Deletion {
-                                Side::Old
-                            } else {
-                                Side::New
-                            },
-                        )
-                    })
-                }),
-                _ => None,
-            }
-            .unwrap_or(("", usize::MAX, key.side));
-            let language_matches = file_meta
-                .get(file_index)
-                .is_some_and(|file| file.language == key.language);
-            expected_side == key.side && language_matches && content == cached.text.as_ref()
-        });
     }
 
     pub(super) fn inline_pair(
@@ -168,7 +130,7 @@ impl DiffViewer {
         {
             return cached.ranges.clone();
         }
-        if self.inline_cache.len() >= 32_768 {
+        if self.inline_cache.len() >= MAX_INLINE_CACHE_ENTRIES {
             self.inline_cache.clear();
         }
         let (old_ranges, new_ranges) = inline_ranges(old, new);
@@ -211,7 +173,7 @@ impl DiffViewer {
         {
             (line.text.clone(), line.highlights.clone())
         } else {
-            if self.syntax_cache.len() >= 65_536 {
+            if self.syntax_cache.len() >= MAX_SYNTAX_CACHE_ENTRIES {
                 self.syntax_cache.clear();
             }
             let text = SharedString::from(content.to_owned());
@@ -270,20 +232,40 @@ impl DiffViewer {
         language: &'static str,
         palette: Palette,
     ) -> Vec<(Range<usize>, HighlightStyle)> {
-        if self.syntax_streams.len() >= MAX_SYNTAX_STREAMS {
-            self.syntax_streams.clear();
-        }
         let key = SyntaxStreamKey {
             theme: self.theme,
             file_index: position.file_index,
-            hunk_index: position.hunk_index,
             side,
             language,
         };
-        self.syntax_streams
-            .entry(key)
-            .or_insert_with(|| SyntaxStreamState::new(language, self.theme))
-            .highlights(position.line_number, content, language, self.theme, palette)
+        self.syntax_stream_clock = self.syntax_stream_clock.wrapping_add(1);
+        let last_used = self.syntax_stream_clock;
+
+        if !self.syntax_streams.contains_key(&key) {
+            if self.syntax_streams.len() >= MAX_SYNTAX_STREAMS
+                && let Some(oldest) = self
+                    .syntax_streams
+                    .iter()
+                    .min_by_key(|(_, stream)| stream.last_used)
+                    .map(|(key, _)| key.clone())
+            {
+                self.syntax_streams.remove(&oldest);
+            }
+            let source = self
+                .diff
+                .syntax_source(position.file_index, matches!(side, Side::Old));
+            self.syntax_streams.insert(
+                key.clone(),
+                SyntaxStreamState::new(language, self.theme, source, last_used),
+            );
+        }
+
+        let stream = self
+            .syntax_streams
+            .get_mut(&key)
+            .expect("syntax stream was inserted above");
+        stream.last_used = last_used;
+        stream.highlights(position.line_number, content, language, self.theme, palette)
     }
 }
 

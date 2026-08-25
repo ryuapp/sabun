@@ -11,7 +11,6 @@ impl DiffViewer {
         &mut self,
         display_index: usize,
         file_index: usize,
-        hunk_index: usize,
         line: &DiffLine,
         content: &str,
         counterpart: Option<(&DiffLine, &str)>,
@@ -47,7 +46,6 @@ impl DiffViewer {
             palette,
             Some(SyntaxPosition {
                 file_index,
-                hunk_index,
                 line_number: if side == Side::Old {
                     line.old_number.expect("old diff line number")
                 } else {

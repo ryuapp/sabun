@@ -111,10 +111,7 @@ jobs:
         run: |
           archive="$ASSET_NAME.zip"
           checksum="$archive.sha256"
-          mkdir -p package
-          cp "target/${{ matrix.target }}/release/sabun" package/sabun
-          chmod 755 package/sabun
-          zip -j "$archive" package/sabun
+          zip -j "$archive" "target/${{ matrix.target }}/release/sabun"
           mkdir -p verify
           unzip -q "$archive" -d verify
           test -x verify/sabun

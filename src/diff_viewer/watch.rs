@@ -132,7 +132,7 @@ impl DiffViewer {
         self.rebuild_file_tree();
         self.cancel_diff_layout_zoom();
         self.rebuild_diff_row_data();
-        self.retain_valid_syntax_cache();
+        self.invalidate_syntax_cache();
         self.diff_smooth_scroll.reset();
         self.pending_scroll_file = (!self.diff.files.is_empty()).then_some(self.selected_file);
         if self.diff.files.is_empty() {

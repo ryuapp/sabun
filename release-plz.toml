@@ -22,6 +22,10 @@ dependencies_update = false
 # Sabun is a binary crate, so API compatibility checks do not apply.
 semver_check = false
 
+[[package]]
+name = "sabun-themes"
+release = false
+
 [changelog]
 protect_breaking_commits = true
 sort_commits = "oldest"
