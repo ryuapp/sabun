@@ -256,6 +256,32 @@ impl DiffSet {
             .map(DiffFileContext::line_count)
     }
 
+    pub(crate) fn syntax_source(&self, file_index: usize, old: bool) -> Option<Arc<String>> {
+        // Full-file context is only needed while SyntaxMate is highlighting this file. Building
+        // both sides for every file up front duplicates a large patch even if most files are
+        // never visited, so streams request and own just the side they currently need.
+        let file = self.files.get(file_index)?;
+        if old {
+            return self
+                .contexts
+                .get(file_index)
+                .and_then(Option::as_ref)
+                .map(|context| Arc::clone(&context.content))
+                .or_else(|| complete_added_or_deleted_source(file, true));
+        }
+        if file.is_deleted {
+            return Some(Arc::new(String::new()));
+        }
+        if file.is_new {
+            return complete_added_or_deleted_source(file, false);
+        }
+        self.contexts
+            .get(file_index)
+            .and_then(Option::as_ref)
+            .and_then(|context| patched_source(file, context))
+            .map(Arc::new)
+    }
+
     pub(crate) fn insert_context(
         &mut self,
         file_index: usize,
@@ -293,6 +319,92 @@ impl DiffSet {
                 .collect(),
         }
     }
+}
+
+fn complete_added_or_deleted_source(file: &DiffFile, old: bool) -> Option<Arc<String>> {
+    if (old && !file.is_deleted) || (!old && !file.is_new) {
+        return None;
+    }
+
+    let mut expected_line = 1;
+    let mut source = String::new();
+    for hunk in &file.hunks {
+        for line in &hunk.lines {
+            let line_number = if old {
+                line.old_number
+            } else {
+                line.new_number
+            };
+            let Some(line_number) = line_number else {
+                continue;
+            };
+            if line_number != expected_line {
+                return None;
+            }
+            source.push_str(hunk.line_content(line));
+            source.push('\n');
+            expected_line += 1;
+        }
+    }
+    Some(Arc::new(source))
+}
+
+fn patched_source(file: &DiffFile, old: &DiffFileContext) -> Option<String> {
+    let old_lines = old.lines(1, old.line_count as usize)?;
+    let mut old_cursor = 1_u32;
+    let mut source = String::with_capacity(old.content.len());
+
+    for hunk in &file.hunks {
+        // Git represents an insertion into an empty file as an old range beginning at line 0.
+        let hunk_old_start = hunk.old_start.max(1);
+        if hunk_old_start < old_cursor {
+            return None;
+        }
+        append_old_lines(&mut source, &old_lines, old_cursor, hunk_old_start)?;
+        old_cursor = hunk_old_start;
+
+        for line in &hunk.lines {
+            match line.kind {
+                LineKind::Addition => {
+                    source.push_str(hunk.line_content(line));
+                    source.push('\n');
+                }
+                LineKind::Deletion => {
+                    if line.old_number != Some(old_cursor) {
+                        return None;
+                    }
+                    old_cursor += 1;
+                }
+                LineKind::Context => {
+                    if line.old_number != Some(old_cursor) {
+                        return None;
+                    }
+                    let content = old_lines.get(usize::try_from(old_cursor - 1).ok()?)?;
+                    source.push_str(content);
+                    source.push('\n');
+                    old_cursor += 1;
+                }
+            }
+        }
+    }
+
+    append_old_lines(
+        &mut source,
+        &old_lines,
+        old_cursor,
+        old.line_count.saturating_add(1),
+    )?;
+    Some(source)
+}
+
+fn append_old_lines(target: &mut String, old_lines: &[&str], start: u32, end: u32) -> Option<()> {
+    let start = usize::try_from(start.checked_sub(1)?).ok()?;
+    let end = usize::try_from(end.checked_sub(1)?).ok()?;
+    for line in old_lines.get(start..end)? {
+        target.push_str(line);
+        target.push('\n');
+    }
+    Some(())
 }
 
 #[derive(Clone, Debug)]
@@ -631,7 +743,7 @@ pub fn from_git_diff(repository: &Repository, diff: &GitDiff<'_>) -> Result<Diff
         .deltas()
         .zip(&files)
         .map(|(delta, file)| {
-            if file.hunks.is_empty() || file.is_new || file.is_deleted {
+            if file.hunks.is_empty() || file.is_new {
                 return None;
             }
             repository
@@ -819,5 +931,43 @@ mod tests {
         assert!(context.line_ranges.get().is_none());
         assert_eq!(context.lines(2, 2).unwrap(), ["two", "three"]);
         assert!(context.line_ranges.get().is_some());
+    }
+
+    #[test]
+    fn syntax_source_reconstructs_each_requested_side_of_a_git_diff() {
+        let mut diff = parse_unified_diff(
+            "diff --git a/file.astro b/file.astro\n--- a/file.astro\n+++ b/file.astro\n@@ -2,3 +2,3 @@\n before\n-old\n+new\n after\n",
+        );
+        diff.contexts = vec![Some(DiffFileContext::new(
+            "zero\nbefore\nold\nafter\ntail\n".into(),
+        ))];
+
+        let old = diff.syntax_source(0, true);
+        let new = diff.syntax_source(0, false);
+
+        assert_eq!(
+            old.as_deref().map(String::as_str),
+            Some("zero\nbefore\nold\nafter\ntail\n")
+        );
+        assert_eq!(
+            new.as_deref().map(String::as_str),
+            Some("zero\nbefore\nnew\nafter\ntail\n")
+        );
+    }
+
+    #[test]
+    fn syntax_source_recovers_a_deleted_files_complete_old_side() {
+        let diff = parse_unified_diff(
+            "diff --git a/file.astro b/file.astro\ndeleted file mode 100644\n--- a/file.astro\n+++ /dev/null\n@@ -1,2 +0,0 @@\n----\n-const title = \"Sabun\";\n",
+        );
+
+        let old = diff.syntax_source(0, true);
+        let new = diff.syntax_source(0, false);
+
+        assert_eq!(
+            old.as_deref().map(String::as_str),
+            Some("---\nconst title = \"Sabun\";\n")
+        );
+        assert_eq!(new.as_deref().map(String::as_str), Some(""));
     }
 }

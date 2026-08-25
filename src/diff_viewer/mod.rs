@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ops::Range,
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -25,9 +25,6 @@ use gpui::{
 use similar::{
     Algorithm, ChangeTag,
     utils::{diff_graphemes, diff_unicode_words},
-};
-use syntect::{
-    easy::HighlightLines, highlighting::FontStyle as SyntectFontStyle, parsing::SyntaxSet,
 };
 
 mod code_text;
@@ -88,14 +85,14 @@ use scroll::{
     scrollbar_axis_length, scrollbar_axis_position, scrollbar_axis_start, scrollbar_metrics,
     set_scrollbar_offset, vertical_auto_scroll_cursor,
 };
-#[cfg(test)]
-use syntax::{detected_language, syntax_set, syntax_theme};
 use syntax::{
-    detected_language_for_file, language_color, syntax_highlighter, syntax_highlights,
-    syntax_highlights_with_state, trim_diff_prefix,
+    SyntaxHighlighter, detected_language_for_file, language_color, syntax_highlighter,
+    syntax_highlights, syntax_highlights_with_state, trim_diff_prefix,
 };
+#[cfg(test)]
+use syntax::{detected_language, syntax_language_count};
 use text_selection::{HeaderTextSelection, TextLane, TextSelection};
-use theme::{Palette, ThemeMode, with_alpha};
+use theme::{Palette, ThemeMode, app_theme, with_alpha};
 use tree_layout::{
     FileTreeData, build_file_tree_data, normalized_path_components, sticky_file_tree_directories,
 };
@@ -589,6 +586,7 @@ struct DiffViewer {
     wrapped_offsets_range: Option<WrapWidthRange>,
     syntax_cache: HashMap<SyntaxCacheKey, CachedCodeLine>,
     syntax_streams: HashMap<SyntaxStreamKey, SyntaxStreamState>,
+    syntax_stream_clock: u64,
     inline_cache: HashMap<InlineCacheKey, CachedInlineHighlightPair>,
     file_meta: Vec<FileViewMeta>,
     file_stats: Vec<(usize, usize)>,
@@ -717,6 +715,7 @@ impl DiffViewer {
             wrapped_offsets_range: None,
             syntax_cache: HashMap::new(),
             syntax_streams: HashMap::new(),
+            syntax_stream_clock: 0,
             inline_cache: HashMap::new(),
             file_meta,
             file_stats,
@@ -766,7 +765,7 @@ impl DiffViewer {
     }
 
     fn palette(&self) -> Palette {
-        Palette::for_mode(self.theme)
+        app_theme(self.theme).palette()
     }
 
     fn toggle_theme(&mut self, cx: &mut Context<Self>) {
@@ -829,11 +828,7 @@ impl DiffViewer {
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ready = matches!(self.startup_state, StartupState::Ready);
-        let palette = if ready {
-            self.palette()
-        } else {
-            Palette::base_for_mode(self.theme)
-        };
+        let palette = self.palette();
         if ready {
             self.update_diff_row_offsets(window, palette);
             self.sync_selected_file_from_scroll();

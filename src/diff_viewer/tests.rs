@@ -10,34 +10,16 @@ use crate::diff::{DiffFile, DiffHunk, DiffSet, LineKind};
 use super::{
     ContextExpandDirection, ContextExpansion, ContextGap, ContextGapPosition, ContextGapSource,
     DIFF_ROW_HEIGHT, DiffDisplayRow, DiffLayout, FileChangeKind, FileTreeRow, HeaderTextSelection,
-    InterpolatedOffsets, Palette, TextLane, TextSelection, ThemeMode, WHEEL_PIXELS_PER_LINE,
-    accumulate_scroll_target, apply_selection_background, build_diff_row_data, build_diff_rows,
-    build_file_diff_rows, build_file_tree_rows, clamp_context_menu_position, clamped_sidebar_width,
-    collapse_file_rows, detected_language, detected_language_for_file, diff_row_layouts,
-    file_tree_row_offsets, inline_ranges, middle_auto_scroll_velocity, paired_line, row_offsets,
-    selection_padding_edges, sticky_file_tree_directories, syntax_highlighter, syntax_highlights,
-    syntax_highlights_with_state, syntax_set, syntax_theme, unpack_diff_row_index,
-    vertical_auto_scroll_cursor, wheel_zoom_direction, windows_vertical_pan_cursor_id,
+    InterpolatedOffsets, TextLane, TextSelection, ThemeMode, WHEEL_PIXELS_PER_LINE,
+    accumulate_scroll_target, app_theme, apply_selection_background, build_diff_row_data,
+    build_diff_rows, build_file_diff_rows, build_file_tree_rows, clamp_context_menu_position,
+    clamped_sidebar_width, collapse_file_rows, detected_language, detected_language_for_file,
+    diff_row_layouts, file_tree_row_offsets, inline_ranges, middle_auto_scroll_velocity,
+    paired_line, row_offsets, selection_padding_edges, sticky_file_tree_directories,
+    syntax_highlighter, syntax_highlights, syntax_highlights_with_state, syntax_language_count,
+    unpack_diff_row_index, vertical_auto_scroll_cursor, wheel_zoom_direction,
+    windows_vertical_pan_cursor_id,
 };
-
-#[test]
-fn original_syntax_themes_are_defaults_and_supply_diff_colors() {
-    let themes = syntect::highlighting::ThemeSet::load_defaults();
-    assert_eq!(
-        syntax_theme(ThemeMode::Dark),
-        &themes.themes["base16-eighties.dark"]
-    );
-    assert_eq!(
-        syntax_theme(ThemeMode::Light),
-        &themes.themes["InspiredGitHub"]
-    );
-    let light_palette = Palette::for_mode(ThemeMode::Light);
-    assert_eq!(light_palette.canvas, rgb(0xffffff));
-    assert_eq!(light_palette.green, rgb(0x16855b));
-    assert_eq!(light_palette.green_bg, rgb(0xeaffea));
-    assert_eq!(light_palette.red, rgb(0xc83f54));
-    assert_eq!(light_palette.red_bg, rgb(0xffecec));
-}
 
 fn file_diff_rows_for_test(
     file: &DiffFile,
@@ -188,8 +170,8 @@ fn multiline_text_selection_bridges_only_across_selected_line_edges() {
 
 #[test]
 fn bundled_syntax_pack_detects_modern_project_files() {
-    assert!(syntax_set().syntaxes().len() >= 100);
-    assert_eq!(detected_language("src/App.vue"), "Vue Component");
+    assert!(syntax_language_count() >= 250);
+    assert_eq!(detected_language("src/App.vue"), "vue");
 
     for path in [
         "src/App.svelte",
@@ -202,7 +184,7 @@ fn bundled_syntax_pack_detects_modern_project_files() {
         "shader.wgsl",
         ".github/workflows/ci.yml",
     ] {
-        assert_ne!(detected_language(path), "Plain Text", "{path}");
+        assert_ne!(detected_language(path), "plaintext", "{path}");
     }
 }
 
@@ -211,43 +193,62 @@ fn vue_markup_receives_syntax_highlights() {
     let markup_highlights = syntax_highlights(
         r#"<template><button @click="count++">{{ count }}</button></template>"#,
         detected_language("Counter.vue"),
-        Palette::for_mode(ThemeMode::Dark),
+        app_theme(ThemeMode::Dark).palette(),
     );
     assert!(markup_highlights.len() >= 3);
 
     let script_highlights = syntax_highlights(
         "const count = ref(0);",
         detected_language("Counter.vue"),
-        Palette::for_mode(ThemeMode::Dark),
+        app_theme(ThemeMode::Dark).palette(),
     );
     assert!(script_highlights.len() >= 3);
 }
 
 #[test]
 fn stateful_syntax_highlighting_carries_multiline_context() {
-    let palette = Palette::for_mode(ThemeMode::Dark);
-    let mut highlighter = syntax_highlighter("Rust", ThemeMode::Dark);
+    let palette = app_theme(ThemeMode::Dark).palette();
+    let mut highlighter = syntax_highlighter("rust", ThemeMode::Dark);
     let mut embedded_highlighter = None;
-    let mut line_buffer = String::new();
     let _ = syntax_highlights_with_state(
         &mut highlighter,
         &mut embedded_highlighter,
-        &mut line_buffer,
         "/* comment starts",
-        "Rust",
+        "rust",
         palette,
     );
     let continued = syntax_highlights_with_state(
         &mut highlighter,
         &mut embedded_highlighter,
-        &mut line_buffer,
         "still a comment */ let value = 1;",
-        "Rust",
+        "rust",
         palette,
     );
-    let standalone = syntax_highlights("still a comment */ let value = 1;", "Rust", palette);
+    let standalone = syntax_highlights("still a comment */ let value = 1;", "rust", palette);
 
     assert_ne!(continued, standalone);
+}
+
+#[test]
+fn viewport_syntax_highlighting_replays_context_before_a_direct_jump() {
+    let source = "/* comment starts\nstill a comment */ let value = 1;\n";
+    let content = "still a comment */ let value = 1;";
+    let mut highlighter = syntax_highlighter("rust", ThemeMode::Dark);
+
+    let contextual = highlighter.highlight_source_line(source, 2);
+    let standalone = syntax_highlights(content, "rust", app_theme(ThemeMode::Dark).palette());
+
+    assert_ne!(contextual, standalone);
+}
+
+#[test]
+fn astro_frontmatter_is_highlighted_when_opened_before_the_viewport() {
+    let source = "---\nconst title = \"Sabun\";\n---\n<h1>{title}</h1>\n";
+    let mut highlighter = syntax_highlighter("astro", ThemeMode::Dark);
+
+    let highlights = highlighter.highlight_source_line(source, 2);
+
+    assert!(highlights.len() >= 3);
 }
 
 #[test]
@@ -270,7 +271,7 @@ fn extensionless_scripts_are_detected_from_the_shebang() {
         is_deleted: false,
     };
 
-    assert_eq!(detected_language_for_file(&file), "Python");
+    assert_eq!(detected_language_for_file(&file), "python");
 }
 
 #[test]
@@ -1103,11 +1104,16 @@ fn large_split_change_uses_one_row_chunk() {
 }
 
 #[test]
-fn syntect_produces_multiple_styles_for_rust() {
+fn syntaxmate_produces_multiple_styles_for_rust() {
     let highlights = syntax_highlights(
         "pub fn answer() -> usize { 42 }",
-        "Rust",
-        Palette::for_mode(ThemeMode::Dark),
+        "rust",
+        app_theme(ThemeMode::Dark).palette(),
     );
     assert!(highlights.len() >= 3);
+    assert!(
+        highlights
+            .iter()
+            .all(|(_, style)| style.background_color.is_none())
+    );
 }

@@ -27,7 +27,7 @@ impl DiffViewer {
             self.viewed_files.insert(path);
         }
         if marking_viewed && !self.collapsed_files.contains(&file_index) {
-            self.toggle_file_collapsed(file_index, false, cx);
+            self.toggle_file_collapsed(file_index, true, cx);
             return;
         }
         cx.notify();
