@@ -1,7 +1,11 @@
 [workspace]
-# Sabun is distributed as an application, not through crates.io. Use Git tags as
-# the source of truth for versions and create GitHub releases without publishing.
-git_only = true
+# Ignore private workspace members by default. Only the Sabun application is a
+# release target; support crates such as sabun-themes remain internal.
+release = false
+
+# Internal workspace crates must not inherit git-only version discovery. That
+# lookup runs before release filtering and would associate them with Sabun's tag.
+git_only = false
 publish = false
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
@@ -12,9 +16,8 @@ git_release_type = "auto"
 git_release_draft = true
 git_release_latest = false
 
-# Bootstrap the initial v0.0.1 release because Cargo.toml already had that
-# version before the first release PR. Restore this to false after v0.0.1 exists.
-release_always = true
+# Release only after a release-plz PR is merged.
+release_always = false
 
 # Keep dependency upgrades separate from release preparation.
 dependencies_update = false
@@ -23,8 +26,11 @@ dependencies_update = false
 semver_check = false
 
 [[package]]
-name = "sabun-themes"
-release = false
+name = "sabun"
+release = true
+# Sabun is distributed as an application, not through crates.io. Use Git tags as
+# the source of truth for versions and create GitHub releases without publishing.
+git_only = true
 
 [changelog]
 protect_breaking_commits = true
