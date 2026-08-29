@@ -13,7 +13,7 @@ impl DiffViewer {
         palette: Palette,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let sticky_file_index = self.sticky_file_index();
+        let sticky_file_header = self.sticky_file_header();
         let (visible_rows, top_space, bottom_space) =
             self.diff_offsets().visible_range(&self.diff_scroll, 108.);
         let mut rows = Vec::with_capacity(visible_rows.len());
@@ -26,6 +26,7 @@ impl DiffViewer {
             .min_h_0()
             .min_w_0()
             .relative()
+            .overflow_hidden()
             .bg(palette.canvas)
             .on_mouse_down(
                 MouseButton::Middle,
@@ -51,11 +52,11 @@ impl DiffViewer {
                     this.scroll_wheel(SmoothScrollTarget::Diff, event, window, cx);
                 }),
             ))
-            .when_some(sticky_file_index, |container, file_index| {
+            .when_some(sticky_file_header, |container, (file_index, top)| {
                 container.child(
                     div()
                         .absolute()
-                        .top_0()
+                        .top(top)
                         .left_0()
                         .right_0()
                         .child(self.render_file_header(file_index, palette, true, cx))

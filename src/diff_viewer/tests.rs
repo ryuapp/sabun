@@ -13,12 +13,12 @@ use super::{
     InterpolatedOffsets, TextLane, TextSelection, ThemeMode, WHEEL_PIXELS_PER_LINE,
     accumulate_scroll_target, app_theme, apply_selection_background, build_diff_row_data,
     build_diff_rows, build_file_diff_rows, build_file_tree_rows, clamp_context_menu_position,
-    clamped_sidebar_width, collapse_file_rows, detected_language, detected_language_for_file,
-    diff_row_layouts, file_tree_row_offsets, inline_ranges, middle_auto_scroll_velocity,
-    paired_line, row_offsets, selection_padding_edges, sticky_file_tree_directories,
-    syntax_highlighter, syntax_highlights, syntax_highlights_with_state, syntax_language_count,
-    unpack_diff_row_index, vertical_auto_scroll_cursor, wheel_zoom_direction,
-    windows_vertical_pan_cursor_id,
+    clamped_sidebar_width, collapse_file_rows, collapsed_sticky_scroll_position, detected_language,
+    detected_language_for_file, diff_row_layouts, file_tree_row_offsets, inline_ranges,
+    middle_auto_scroll_velocity, paired_line, row_offsets, selection_padding_edges,
+    sticky_file_header_top, sticky_file_tree_directories, syntax_highlighter, syntax_highlights,
+    syntax_highlights_with_state, syntax_language_count, unpack_diff_row_index,
+    vertical_auto_scroll_cursor, wheel_zoom_direction, windows_vertical_pan_cursor_id,
 };
 
 fn file_diff_rows_for_test(
@@ -42,6 +42,40 @@ fn zoomed_row_offsets_are_interpolated_without_materializing_every_row() {
     assert_eq!(offsets.row_index_at(px(24.), 3), 1);
     assert_eq!(offsets.row_index_at(px(25.), 3), 2);
     assert_eq!(offsets.last(), Some(px(37.5)));
+}
+
+#[test]
+fn next_file_header_smoothly_pushes_sticky_header_out() {
+    assert_eq!(sticky_file_header_top(px(100.), None), px(0.));
+    assert_eq!(sticky_file_header_top(px(100.), Some(px(200.))), px(0.));
+    assert_eq!(sticky_file_header_top(px(156.), Some(px(200.))), px(0.));
+    assert_eq!(sticky_file_header_top(px(160.), Some(px(200.))), px(-4.));
+    assert_eq!(sticky_file_header_top(px(199.), Some(px(200.))), px(-43.));
+}
+
+#[test]
+fn collapsing_file_preserves_the_sticky_headers_visible_position() {
+    let header_top = px(100.);
+    let next_header_top = px(144.);
+
+    let pinned = collapsed_sticky_scroll_position(header_top, Some(next_header_top), px(0.));
+    assert_eq!(pinned, header_top);
+    assert_eq!(
+        sticky_file_header_top(pinned, Some(next_header_top)),
+        px(0.)
+    );
+
+    let pushed = collapsed_sticky_scroll_position(header_top, Some(next_header_top), px(-12.));
+    assert_eq!(pushed, px(112.));
+    assert_eq!(
+        sticky_file_header_top(pushed, Some(next_header_top)),
+        px(-12.)
+    );
+
+    assert_eq!(
+        collapsed_sticky_scroll_position(header_top, None, px(0.)),
+        header_top
+    );
 }
 
 #[test]

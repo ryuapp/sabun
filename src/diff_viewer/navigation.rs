@@ -2,10 +2,29 @@ use std::ops::Range;
 
 use super::{
     CONTEXT_LINES_PER_STEP, Context, ContextExpandDirection, ContextGap, ContextGapPosition,
-    ContextGapSource, DiffLayout, DiffRowData, DiffViewer, FileTreeData, FileTreeRow,
-    build_diff_row_data, build_file_tree_data, collapse_file_rows, normalized_path_components,
-    point, px,
+    ContextGapSource, DiffLayout, DiffRowData, DiffViewer, FILE_HEADER_HEIGHT, FileTreeData,
+    FileTreeRow, Pixels, build_diff_row_data, build_file_tree_data, collapse_file_rows,
+    normalized_path_components, point, px,
 };
+
+pub(super) fn sticky_file_header_top(
+    scroll_position: Pixels,
+    next_header_top: Option<Pixels>,
+) -> Pixels {
+    next_header_top.map_or(px(0.), |next_header_top| {
+        (next_header_top - scroll_position - px(FILE_HEADER_HEIGHT)).min(px(0.))
+    })
+}
+
+pub(super) fn collapsed_sticky_scroll_position(
+    header_top: Pixels,
+    next_header_top: Option<Pixels>,
+    sticky_top: Pixels,
+) -> Pixels {
+    next_header_top.map_or(header_top, |next_header_top| {
+        next_header_top - px(FILE_HEADER_HEIGHT) - sticky_top
+    })
+}
 
 impl DiffViewer {
     pub(super) fn is_file_viewed(&self, file_index: usize) -> bool {
@@ -79,6 +98,10 @@ impl DiffViewer {
         if file_index >= self.diff.files.len() {
             return;
         }
+        let sticky_top = sticky_header
+            .then(|| self.sticky_file_header())
+            .flatten()
+            .and_then(|(sticky_file_index, top)| (sticky_file_index == file_index).then_some(top));
         let collapsing = !self.collapsed_files.remove(&file_index);
         if collapsing {
             self.collapsed_files.insert(file_index);
@@ -104,12 +127,12 @@ impl DiffViewer {
         if let Some(removed_rows) = removed_rows {
             self.reindex_display_caches_after_removal(removed_rows);
             self.pending_scroll_file = None;
-            if sticky_header {
-                self.scroll_to_file(file_index);
+            if let Some(sticky_top) = sticky_top {
+                self.preserve_collapsed_sticky_header(file_index, sticky_top);
             }
         } else {
             self.rebuild_diff_row_data();
-            self.pending_scroll_file = sticky_header.then_some(file_index);
+            self.pending_scroll_file = sticky_top.map(|_| file_index);
             self.clear_diff_caches();
         }
         self.diff_smooth_scroll.reset();
@@ -276,6 +299,29 @@ impl DiffViewer {
         self.diff_smooth_scroll.stop_at(target);
     }
 
+    fn preserve_collapsed_sticky_header(&mut self, file_index: usize, sticky_top: Pixels) {
+        let offsets = self.diff_offsets();
+        let Some(header_top) = self
+            .file_row_indices
+            .get(file_index)
+            .and_then(|row_index| offsets.get(*row_index))
+        else {
+            return;
+        };
+        let next_header_top = file_index
+            .checked_add(1)
+            .and_then(|next_file_index| self.file_row_indices.get(next_file_index))
+            .and_then(|row_index| offsets.get(*row_index));
+        let position = collapsed_sticky_scroll_position(header_top, next_header_top, sticky_top);
+        let current = self.diff_scroll.offset();
+        let content_height = offsets.last().unwrap_or_default();
+        let viewport_height = self.diff_scroll.bounds().size.height;
+        let max_y = (content_height - viewport_height).max(px(0.));
+        let target = point(current.x, -position.clamp(px(0.), max_y));
+        self.diff_scroll.set_offset(target);
+        self.diff_smooth_scroll.stop_at(target);
+    }
+
     fn reveal_file_in_sidebar(&mut self, file_index: usize) {
         let viewport = self.file_scroll.bounds().size.height;
         if viewport <= px(0.) {
@@ -369,7 +415,7 @@ impl DiffViewer {
         }
     }
 
-    pub(super) fn sticky_file_index(&self) -> Option<usize> {
+    pub(super) fn sticky_file_header(&self) -> Option<(usize, Pixels)> {
         if self.diff_rows.is_empty() {
             return None;
         }
@@ -386,7 +432,18 @@ impl DiffViewer {
             .get(file_index)
             .and_then(|row_index| self.diff_offsets().get(*row_index))?;
 
-        (position > header_top).then_some(file_index)
+        if position <= header_top {
+            return None;
+        }
+
+        let next_header_top = file_index
+            .checked_add(1)
+            .and_then(|next_file_index| self.file_row_indices.get(next_file_index))
+            .and_then(|row_index| self.diff_offsets().get(*row_index));
+        Some((
+            file_index,
+            sticky_file_header_top(position, next_header_top),
+        ))
     }
 
     pub(super) fn next_file(&mut self, cx: &mut Context<Self>) {
