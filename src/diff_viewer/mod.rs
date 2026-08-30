@@ -77,6 +77,8 @@ use layout::{
     wrapped_code_width,
 };
 #[cfg(test)]
+use navigation::{collapsed_sticky_scroll_position, sticky_file_header_top};
+#[cfg(test)]
 use scroll::{
     WHEEL_PIXELS_PER_LINE, accumulate_scroll_target, middle_auto_scroll_velocity,
     wheel_zoom_direction, windows_vertical_pan_cursor_id,
@@ -133,6 +135,7 @@ const SOURCE_PICKER_SCROLLBAR_WIDTH: f32 = 10.;
 const TREE_SCROLLBAR_GAP: f32 = 2.;
 const TREE_DIRECTORY_ROW_HEIGHT: f32 = 28.;
 const TREE_FILE_ROW_HEIGHT: f32 = 28.;
+const FILE_HEADER_HEIGHT: f32 = 44.;
 const DIFF_ROW_HEIGHT: f32 = 21.;
 const DIFF_CODE_LINE_HEIGHT: f32 = 17.;
 const DIFF_CODE_PADDING_Y: f32 = 2.;
@@ -352,7 +355,7 @@ impl DiffDisplayRow {
     const fn height(&self) -> Pixels {
         match self {
             Self::FileGap => px(18.),
-            Self::FileHeader { .. } => px(44.),
+            Self::FileHeader { .. } => px(FILE_HEADER_HEIGHT),
             Self::Separator {
                 position: Some(ContextGapPosition::Middle),
                 ..

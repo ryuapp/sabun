@@ -1,8 +1,8 @@
 use super::{
     Animation, AnimationExt, Context, CopyPathFeedbackPhase, CursorStyle, DiffStats, DiffViewer,
-    Duration, FileChangeBadge, FluentBuilder, FontWeight, HighlightStyle, InteractiveElement,
-    IntoElement, MouseButton, Palette, ParentElement, SCROLLBAR_WIDTH, Styled, StyledText,
-    combine_highlights, div, ease_out_quint, px,
+    Duration, FILE_HEADER_HEIGHT, FileChangeBadge, FluentBuilder, FontWeight, HighlightStyle,
+    InteractiveElement, IntoElement, MouseButton, Palette, ParentElement, SCROLLBAR_WIDTH, Styled,
+    StyledText, combine_highlights, div, ease_out_quint, px,
 };
 use crate::icons::{DISCLOSURE_ICON_SIZE, check_icon, copy_icon, disclosure_icon};
 
@@ -129,7 +129,7 @@ impl DiffViewer {
                 },
                 file_index,
             ))
-            .h(px(44.))
+            .h(px(FILE_HEADER_HEIGHT))
             .w_full()
             .flex_none()
             .flex()
