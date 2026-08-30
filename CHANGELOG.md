@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.0.2](https://github.com/ryuapp/sabun/compare/v0.0.1...v0.0.2) - 2026-08-30
+
+### Added
+
+- Add viewed file tracking ([#2](https://github.com/ryuapp/sabun/pull/2))
+
+- Add diff source picker ([#4](https://github.com/ryuapp/sabun/pull/4))
+
+- Add worktree switcher ([#7](https://github.com/ryuapp/sabun/pull/7))
+
+- Migrate syntax highlighting to syntaxmate ([#8](https://github.com/ryuapp/sabun/pull/8))
+
+- Smooth sticky file headers ([#9](https://github.com/ryuapp/sabun/pull/9))
+
+### Fixed
+
+- Scope release-plz to sabun
+
+### Other
+
+- Link pull requests in changelog
+
+- Reuse ubuntu setup action
+
+- Migrate CLI parser to usage-rs ([#5](https://github.com/ryuapp/sabun/pull/5))
+
+- Defer initial diff loading ([#6](https://github.com/ryuapp/sabun/pull/6))
+
+- Add demo image for Sabun
 
 ## [0.0.1](https://github.com/ryuapp/sabun/releases/tag/v0.0.1) - 2026-08-20
 
